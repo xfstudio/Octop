@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/readme-banner-zh.png" alt="Octop Banner" width="600" />
+  <img src="docs/assets/readme-banner-zh.png" alt="Octop application logo" width="108" height="108" />
 </p>
 
 <p align="center">
@@ -42,6 +42,8 @@
 **Octop** 是一个开源、自托管的 AI 助手。它不仅是工具，更是可并行运作的数字生命体。通过多 Agent 架构，它为团队、家庭和个人构建了既独立又协作的智能环境。并且这一切都运行在你的机器上——完全自托管的设计让隐私不再是妥协，而单进程启动的便捷性，则让强大的 Web 控制台、CLI 与 IM 集成触手可及。
 
 借助飞书、钉钉、QQ、微信、企业微信或 HTTP/SSE/WebSocket API 与任意 Agent 对话；通过**专家库**一键创建专业角色，通过 **Connector**（OAuth + MCP）接入外部服务，通过 **ACP** 与 IDE / 终端 AI 工具双向协作。
+
+长程工作台提供租户与私有空间、设备离线配置、显式跨设备同步，以及 BeatDesign、Temporal、Semantica、Hindsight、CommerceAgentBench 和 RNA 的集成入口。使用方式、PPT 对照及当前能力边界见 [BM 多租户长程任务说明](docs/bm-platform.md)，开发部署见 [Compose 说明](docker/README.longterm.md)。
 
 ## ✨ 亮点
 

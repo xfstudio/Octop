@@ -18,7 +18,7 @@ import {
 import { apiErrorMessage } from "../../utils/apiError";
 import { refreshServerLabels } from "../../i18n";
 import { applyUserLocale, applyGuestLocale } from "../../utils/locale";
-import { useTheme } from "../../context/ThemeContext";
+import { APP_LOGO_SRC } from "../../assets/brand";
 import {
   isSsoPopup,
   isSsoPopupMessage,
@@ -74,7 +74,6 @@ function providerIcon(provider: OauthProviderStatus): ReactNode {
 
 export default function LoginPage() {
   const { t } = useTranslation();
-  const { isDark } = useTheme();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [username, setUsername] = useState("");
@@ -270,13 +269,11 @@ export default function LoginPage() {
         }}
       >
         <img
-          src={
-            isDark ? "/logo_horizontal_white.png" : "/logo_horizontal_dark.png"
-          }
+          src={APP_LOGO_SRC}
           alt="Octop"
           style={{
             height: 48,
-            width: "auto",
+            width: 48,
             maxWidth: 260,
             objectFit: "contain",
             display: "block",
@@ -410,6 +407,9 @@ export default function LoginPage() {
             open={showForgotHelp}
             onClose={() => setShowForgotHelp(false)}
           />
+          <Button type="link" onClick={() => navigate("/offline-workbench")}>
+            {t("longterm.offlineEntry")}
+          </Button>
         </div>
 
         {providers.length > 0 && (

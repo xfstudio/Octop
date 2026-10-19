@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favico.svg" />
+    <link rel="icon" type="image/png" href="/musae-logo.png" sizes="108x108" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta
       name="viewport"
@@ -146,19 +146,9 @@
         inset: 14px;
         width: 60px;
         height: 60px;
-        border-radius: 14px;
         object-fit: contain;
         display: block;
         animation: octop-boot-breathe 1.6s ease-in-out infinite;
-      }
-      .octop-boot-logo--dark {
-        display: none;
-      }
-      html[data-theme="dark"] .octop-boot-logo--light {
-        display: none;
-      }
-      html[data-theme="dark"] .octop-boot-logo--dark {
-        display: block;
       }
       #octop-boot-text {
         font-size: 14px;
@@ -278,15 +268,8 @@
         <div id="octop-boot-mark" aria-hidden="true">
           <div id="octop-boot-ring"></div>
           <img
-            class="octop-boot-logo octop-boot-logo--light"
-            src="/logo_vertical_dark.svg"
-            alt=""
-            width="60"
-            height="60"
-          />
-          <img
-            class="octop-boot-logo octop-boot-logo--dark"
-            src="/logo_vertical_white.svg"
+            class="octop-boot-logo"
+            src="/musae-logo.png"
             alt=""
             width="60"
             height="60"

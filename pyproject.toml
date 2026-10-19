@@ -50,6 +50,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+longterm-temporal = ["temporalio>=1.8,<2"]
+longterm-memory = ["hindsight-client>=1.0,<2"]
+longterm-provenance = ["semantica>=0.7,<0.8; python_version < '3.14'"]
+
 # PEP 621 extras — kept so `pip install -e ".[dev]"` keeps working for
 # legacy / CI flows. `uv sync` reads `[dependency-groups].dev` below.
 dev = [
@@ -105,6 +109,7 @@ include = [
     "src/octop/**/*.py",
     "src/octop/**/*.json",
     "src/octop/**/*.md",
+    "src/octop/**/*.mjs",
     "src/octop/**/*.sql",
     "src/octop/**/*.sh",
     "src/octop/**/*.png",

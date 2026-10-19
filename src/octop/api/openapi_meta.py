@@ -143,6 +143,15 @@ OPENAPI_TAGS: list[dict[str, str]] = [
         "name": "teams",
         "description": "Expert teams: roster, create/edit, and member dispatch.",
     },
+    {
+        "name": "longterm",
+        "description": (
+            "Tenant memberships and private spaces, explicit configuration synchronization, "
+            "frozen multi-agent workflows, durable task commands and hash-chain evidence. "
+            "Includes governed memory, provenance, benchmark imports and gated RNA candidates. "
+            "Global administrators still require tenant membership; spaces remain user-private."
+        ),
+    },
     {"name": "workspace", "description": "Agent workspace file tree: list, read, write, upload."},
     {"name": "agent_files", "description": "Agent-owned configuration files (SOUL.md, skills, …)."},
     {"name": "usage", "description": "Token usage summaries for billing and dashboards."},

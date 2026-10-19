@@ -19,6 +19,7 @@ import {
   GraduationCap,
   Shield,
   PanelsTopLeft,
+  GitBranch,
 } from "lucide-react";
 import type { OctopUser } from "../api/modules/auth";
 import { navAllowed, userCan } from "../utils/permissions";
@@ -68,6 +69,7 @@ export const SIDEBAR_NAV_KEYS = [
   "chat",
   "experts",
   "tasks",
+  "longterm",
   "token-usage",
   "personalization",
   "channels",
@@ -183,6 +185,12 @@ export function buildNavSections(
       labelKey: "nav.tokenUsage",
     });
   }
+  topItems.push({
+    key: "longterm",
+    path: "/longterm",
+    icon: <GitBranch size={iconSize} strokeWidth={iconStroke} />,
+    labelKey: "nav.longterm",
+  });
   const sections: NavSection[] = [{ items: topItems }];
 
   const settingsItems: NavItem[] = [];

@@ -4,14 +4,13 @@ import type { WelcomeQuickCard } from "../components/WelcomeScreen";
 
 const MAX_DEFAULT_ROWS = 2;
 const MOBILE_MIN_VISIBLE = 2;
-const MASCOT_ASPECT = 711 / 812;
 const HEADING_HEIGHT_NO_MASCOT = 72;
 
 function estimateMascotHeight(): number {
   const w = window.innerWidth;
-  if (w < 768) return Math.round(185 * MASCOT_ASPECT - 14);
-  if (w >= 1200) return Math.round(300 * MASCOT_ASPECT - 24);
-  return Math.round(240 * MASCOT_ASPECT - 20);
+  if (w < 768) return 110 - 10;
+  if (w >= 1200) return 172 - 16;
+  return 132 - 12;
 }
 
 export function useWelcomeQuickCardsLayout(quickCards: WelcomeQuickCard[]) {

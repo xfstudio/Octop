@@ -1,4 +1,5 @@
-import { Button, Result } from "antd";
+import { Button, Result, Space } from "antd";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { OctopEmptyMascot } from "../EmptyState";
 import styles from "./BootOfflinePanel.module.less";
@@ -31,9 +32,12 @@ export default function BootOfflinePanel({ onRetry }: BootOfflinePanelProps) {
         title={t("errors.offlineTitle")}
         subTitle={t("errors.offlineSubtitle")}
         extra={
-          <Button type="primary" onClick={handleRetry}>
-            {t("errors.retry")}
-          </Button>
+          <Space wrap>
+            <Button type="primary" onClick={handleRetry}>
+              {t("errors.retry")}
+            </Button>
+            <Link to="/offline-workbench">{t("longterm.offlineEntry")}</Link>
+          </Space>
         }
       />
     </div>

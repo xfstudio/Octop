@@ -1,0 +1,110 @@
+# Local development stack; see README.longterm.md. No service is started by
+# generating or validating this file. All Octop processes share PostgreSQL.
+name: octop-longterm
+
+x-octop-environment: &octop-environment
+  HOME: /data
+  OCTOP_HOME: /data/.octop
+  OCTOP_BIND_HOST: 0.0.0.0
+  OCTOP_PORT: "8088"
+  OCTOP_DATABASE_DRIVER: postgresql
+  OCTOP_DATABASE_URL: ""
+  OCTOP_DATABASE_HOST: postgres
+  OCTOP_DATABASE_PORT: "5432"
+  OCTOP_DATABASE_NAME: octop
+  OCTOP_DATABASE_USER: octop
+  OCTOP_DATABASE_PASSWORD: ${OCTOP_LONGTERM_DB_PASSWORD:?Set OCTOP_LONGTERM_DB_PASSWORD before using this compose file}
+  OCTOP_TEMPORAL_ADDRESS: ${OCTOP_TEMPORAL_ADDRESS:-temporal:7233}
+  OCTOP_TEMPORAL_NAMESPACE: ${OCTOP_TEMPORAL_NAMESPACE:-default}
+  OCTOP_TEMPORAL_TASK_QUEUE: ${OCTOP_TEMPORAL_TASK_QUEUE:-octop-longterm}
+  OCTOP_TEMPORAL_TLS: ${OCTOP_TEMPORAL_TLS:-false}
+  OCTOP_TEMPORAL_API_KEY: ${OCTOP_TEMPORAL_API_KEY:-}
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.1-pg16@sha256:33198da2828a14c30348d2ccb4750833d5ed9a44c88d840a0e523d7417120337
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: octop_bootstrap
+      POSTGRES_DB: octop
+      POSTGRES_PASSWORD: ${OCTOP_LONGTERM_BOOTSTRAP_DB_PASSWORD:-${OCTOP_LONGTERM_DB_PASSWORD:?Set OCTOP_LONGTERM_DB_PASSWORD}}
+      OCTOP_DATABASE_PASSWORD: ${OCTOP_LONGTERM_DB_PASSWORD:?Set OCTOP_LONGTERM_DB_PASSWORD}
+    volumes:
+      - control_db:/var/lib/postgresql/data
+      - ./postgres/init-vector.sql:/docker-entrypoint-initdb.d/01-vector.sql:ro
+      - ./postgres/init-longterm-roles.sh:/docker-entrypoint-initdb.d/02-longterm-roles.sh:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          psql -U octop_bootstrap -d octop -Atqc
+          "SELECT 1 FROM pg_roles WHERE rolname = 'octop' AND NOT rolsuper AND NOT rolbypassrls"
+          | grep -qx 1
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  octop:
+    image: octop:longterm
+    restart: unless-stopped
+    environment:
+      <<: *octop-environment
+      OCTOP_DEFAULT_PASSWORD: ${OCTOP_DEFAULT_PASSWORD:-}
+      OCTOP_ADMIN_USERNAME: ${OCTOP_ADMIN_USERNAME:-admin}
+    ports:
+      - "127.0.0.1:${OCTOP_PORT:-8088}:8088"
+    volumes:
+      - octop_data:/data/.octop
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://127.0.0.1:8088/api/health]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 10
+
+  temporal:
+    profiles: [temporal-server]
+    image: temporalio/temporal:1.5.1@sha256:597a5dbbcc6e7716b326dde4a51622d5ea0879eb0cf06ff8a94381361d0a987d
+    restart: unless-stopped
+    command: [server, start-dev, --ip, 0.0.0.0, --port, "7233", --ui-port, "8233", --db-filename, /home/temporal/temporal.db]
+    ports:
+      - "127.0.0.1:7233:7233"
+      - "127.0.0.1:8233:8233"
+    volumes:
+      - temporal_data:/home/temporal
+    healthcheck:
+      test: [CMD, temporal, operator, cluster, health, --address, 127.0.0.1:7233]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 10
+
+  worker:
+    profiles: [worker]
+    image: octop:longterm
+    restart: unless-stopped
+    entrypoint: [/app/.venv/bin/python, -m, octop.infra.longterm.worker]
+    environment:
+      <<: *octop-environment
+      OCTOP_LONGTERM_WORKER: "1"
+    volumes:
+      - octop_data:/data/.octop
+    depends_on:
+      postgres:
+        condition: service_healthy
+      octop:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, /app/.venv/bin/python, -m, octop.infra.longterm.worker, --healthcheck]
+      interval: 20s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+
+volumes:
+  control_db:
+  octop_data:
+  temporal_data:

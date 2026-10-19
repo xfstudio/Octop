@@ -11,6 +11,9 @@ from octop.infra.utils.locale import Locale, normalize_locale
 
 
 class ErrorCode(StrEnum):
+    LONGTERM_INVALID = "LONGTERM_INVALID"
+    LONGTERM_CONFLICT = "LONGTERM_CONFLICT"
+    LONGTERM_UNAVAILABLE = "LONGTERM_UNAVAILABLE"
     AUTH_FAILED = "AUTH_FAILED"
     TOKEN_EXPIRED = "TOKEN_EXPIRED"
     SETUP_REQUIRED = "SETUP_REQUIRED"
@@ -152,6 +155,9 @@ class ErrorCode(StrEnum):
 
 
 _DEFAULT_STATUS: dict[ErrorCode, int] = {
+    ErrorCode.LONGTERM_INVALID: 422,
+    ErrorCode.LONGTERM_CONFLICT: 409,
+    ErrorCode.LONGTERM_UNAVAILABLE: 503,
     ErrorCode.AUTH_FAILED: 401,
     ErrorCode.TOKEN_EXPIRED: 401,
     ErrorCode.SETUP_REQUIRED: 409,

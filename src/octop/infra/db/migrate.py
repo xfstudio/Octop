@@ -2089,6 +2089,27 @@ def run_migrations(db: DatabasePool) -> None:
                 _ensure_knowledge_bases_schema(db)
         else:
             _apply_sqlite_migration(db, version, path)
+    # Repair partial/restored v22 databases whose watermark already skipped DDL.
+    longterm_migrations = [(v, p) for v, p in _discover(db.dialect) if v == 22]
+    if longterm_migrations and not all(
+        _table_exists(db, table)
+        for table in (
+            "bm_tenants",
+            "bm_memberships",
+            "bm_spaces",
+            "bm_tasks",
+            "bm_events",
+            "bm_commands",
+        )
+    ):
+        _, longterm_path = longterm_migrations[0]
+        longterm_sql = longterm_path.read_text(encoding="utf-8")
+        if db.dialect == "postgresql":
+            with db.connect() as conn, conn.transaction():
+                _apply_postgresql_migration(conn, longterm_sql)
+        else:
+            with db.connect() as conn:
+                conn.executescript(longterm_sql)
     _reconcile_pre_squash_schema_version(db)
     _ensure_knowledge_bases_schema(db)
     _ensure_skill_packages_schema(db)

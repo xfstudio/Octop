@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/readme-banner.png" alt="Octop Banner" width="600" />
+  <img src="docs/assets/readme-banner.png" alt="Octop application logo" width="108" height="108" />
 </p>
 
 <p align="center">
@@ -42,6 +42,8 @@
 **Octop** is an open-source, self-hosted AI assistant. It's not just a tool — it's a digital life form that can operate in parallel. Through its multi-agent architecture, it builds an intelligent environment that is both independent and collaborative for teams, families, and individuals. Best of all, it runs entirely on your machine — the fully self-hosted design means privacy is never a compromise, while single-process startup makes the powerful web console, CLI, and IM integrations readily accessible.
 
 Chat through the Web Dashboard, Feishu, DingTalk, QQ, WeChat, Telegram, Discord, WeCom, or programmatic HTTP/SSE/WebSocket. Extend capabilities with the **expert library**, **Connectors** (OAuth + MCP), and **ACP** integration for IDE workflows.
+
+The long-term workbench adds tenant-private spaces, device-local configuration, explicit synchronization, and integration points for BeatDesign, Temporal, Semantica, Hindsight, CommerceAgentBench, and RNA. See the [BM platform guide](docs/bm-platform.md) for setup, design mapping, and current limits, and the [Compose guide](docker/README.longterm.md) for development deployment.
 
 ## ✨ Highlights
 

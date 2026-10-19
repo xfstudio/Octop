@@ -28,6 +28,7 @@ from octop.infra.db.factory import open_database, should_defer_control_plane_db
 from octop.infra.db.migrate import run_migrations
 from octop.infra.db.services import SharedServices, build_shared_services
 from octop.infra.gateway.gateway import Gateway
+from octop.infra.longterm.service import LongtermService
 from octop.infra.mobile.config_probe import ensure_mobile_capabilities_probed
 from octop.infra.proactive.scheduler import ProactiveCareScheduler
 from octop.infra.proactive.service import ProactiveCareService
@@ -326,6 +327,7 @@ class OctopServer:
         self.subagent_catalog: SubagentCatalog | None = None
         self.plugin_manager: PluginManager | None = None
         self.wizard_tokens = WizardTokenStore(ttl_seconds=300)
+        self.longterm_service: LongtermService | None = None
         self._started = False
         self._started_at: int | None = None
         self._sso_service: SsoService | None = None
@@ -660,6 +662,10 @@ class OctopServer:
         )
         resume_pending_index_jobs(self.services)
 
+        self.longterm_service = LongtermService(self.services, agent_registry=registry)
+        if os.environ.get("OCTOP_LONGTERM_WORKER") != "1":
+            await self.longterm_service.recover()
+
         # Resume Bridge links that opted into auto-reconnect (best-effort).
         async def _resume_bridges() -> None:
             with suppress(Exception):
@@ -743,6 +749,9 @@ class OctopServer:
         try:
             from octop.infra.connectors.gateway import agently_auth
 
+            if self.longterm_service is not None:
+                await self.longterm_service.close()
+                self.longterm_service = None
             await agently_auth.close()
             if self.app_runtime is not None:
                 rt = self.app_runtime

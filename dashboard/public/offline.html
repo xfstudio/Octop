@@ -2,6 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/musae-logo.png" />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
@@ -33,10 +34,9 @@
       .logo {
         width: 72px;
         height: 72px;
-        border-radius: 16px;
+        object-fit: contain;
         margin: 0 auto 24px;
         display: block;
-        opacity: 0.9;
       }
       h1 {
         font-size: 22px;
@@ -68,7 +68,7 @@
   </head>
   <body>
     <div class="container">
-      <img src="logo_vertical_white.svg" alt="Octop" class="logo" />
+      <img src="musae-logo.png" alt="Octop" class="logo" />
       <h1>当前处于离线状态</h1>
       <p>无法连接到 Octop 服务端。<br />请检查网络连接后重试。</p>
       <button onclick="location.reload()">重新连接</button>

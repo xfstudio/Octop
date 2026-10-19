@@ -50,11 +50,9 @@ describe("index.html boot theme", () => {
     );
   });
 
-  it("uses the white vertical mark in dark mode", () => {
-    expect(INDEX_HTML).toContain('src="/logo_vertical_white.svg"');
-    expect(INDEX_HTML).toContain(
-      'html[data-theme="dark"] .octop-boot-logo--dark',
-    );
+  it("uses the original transparent mark without a theme recoloring variant", () => {
+    expect(INDEX_HTML).toContain('src="/musae-logo.png"');
+    expect(INDEX_HTML).not.toContain("logo_vertical_");
   });
 
   it("keeps a stored light preference over OS dark", () => {

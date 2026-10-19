@@ -104,6 +104,13 @@ Linux also needs GTK4 + WebKitGTK 6 to link. macOS 12+.
 | `src/build/appicon-macos.png` | macOS `.icns` | 1024x1024 canvas, artwork 824x824 centred |
 | `src/assets/tray-icon.png` | Tray + app icon on Windows/Linux | Full-bleed |
 | `src/assets/tray-icon-template.png` | macOS menu bar | 88px canvas, 64px black-on-transparent glyph |
+| `src/assets/musae-logo.png` | Embedded splash screen | Transparent square brand artwork |
+
+All brand images are derived from `../branding/musae-logo.png` using
+`uv run --no-sync python scripts/generate_branding.py` from the repository root.
+The generator also updates the FnOS launcher icons and the Linux virtual
+desktop's start-menu icon and wallpaper. The platform build tasks regenerate
+the ignored Windows `.ico` and macOS `.icns` resources from the PNG sources.
 
 macOS sizes both surfaces to a fixed box, so the padding has to live in the
 artwork: the Dock follows Apple's 824/1024 icon grid, and Wails scales the menu

@@ -4,7 +4,7 @@ import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
 import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import DesktopWindowControls from "./components/DesktopWindowControls";
 import {
   DesktopChromeProvider,
@@ -33,6 +33,8 @@ import "./styles/theme-vars.css";
 import "./styles/layout.css";
 import "./styles/form-override.css";
 import "./styles/spin-override.css";
+
+const OfflineWorkbench = lazy(() => import("./pages/Longterm"));
 
 const GlobalStyle = createGlobalStyle`
 * {
@@ -132,6 +134,14 @@ function ThemedApp() {
             <DesktopWindowControls chrome={desktopChrome} />
           ) : null}
           <Routes>
+            <Route
+              path="/offline-workbench"
+              element={
+                <Suspense fallback={<OctopSpinner />}>
+                  <OfflineWorkbench standalone />
+                </Suspense>
+              }
+            />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/login/oidc/complete" element={<OidcComplete />} />
             <Route path="/setup" element={<SetupPage />} />

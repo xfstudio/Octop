@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"os/exec"
 	"strconv"
@@ -10,6 +11,10 @@ import (
 
 	"golang.org/x/sys/windows"
 )
+
+func isAddressInUse(err error) bool {
+	return errors.Is(err, windows.WSAEADDRINUSE)
+}
 
 func hideConsole(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{

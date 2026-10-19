@@ -39,6 +39,7 @@ describe("sidebarNavLayout", () => {
       "experts",
       "tasks",
       "token-usage",
+      "longterm",
     ]);
     expect(editor.groups.map((group) => group.id)).toEqual([
       "settings",

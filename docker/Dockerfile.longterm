@@ -1,0 +1,15 @@
+# syntax=docker/dockerfile:1
+# Build the existing runtime first:
+#   docker build -f docker/Dockerfile -t octop:longterm-base .
+#   docker build -f docker/Dockerfile.longterm -t octop:longterm .
+ARG OCTOP_BASE_IMAGE=octop:longterm-base
+FROM ${OCTOP_BASE_IMAGE}
+
+WORKDIR /app
+# Keep the base runtime's browser/OCR dependencies and add only the durable
+# orchestration extra. Semantica and Hindsight remain opt-in integrations.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev \
+        --extra browser --extra local-embedding --extra knowledge-ocr \
+        --extra longterm-temporal \
+    && /app/.venv/bin/python -c "from temporalio.worker import Worker; from octop.infra.longterm.worker import run"

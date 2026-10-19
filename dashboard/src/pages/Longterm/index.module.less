@@ -1,0 +1,78 @@
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.select {
+  min-width: 220px;
+  max-width: 100%;
+}
+.flexSelect {
+  flex: 1;
+  min-width: 0;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.codeInput {
+  font-family: ui-monospace, monospace;
+}
+.json {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 16px;
+  background: var(--fn-bg-layout);
+  border-radius: 8px;
+  font-size: 12px;
+  max-height: 480px;
+  overflow: auto;
+}
+.digest {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+.goalLink {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  text-align: start;
+  padding-inline: 0;
+}
+.standalone {
+  padding: 24px;
+  max-width: 1280px;
+  margin: 0 auto;
+  min-height: 100dvh;
+  height: 100dvh;
+  overflow: auto;
+  background: var(--fn-bg-container);
+}
+.standaloneHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+@media (max-width: 680px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .standalone {
+    padding: 12px;
+  }
+  .standaloneHeader {
+    flex-direction: column;
+  }
+}

@@ -51,14 +51,15 @@ async function fetchServerTimezone(): Promise<string> {
 }
 
 /** Server timezone from config.json `default_timezone` (via GET /api/settings/timezone). */
-export function useServerTimezone(): string {
+export function useServerTimezone(enabled = true): string {
   const [timezone, setTimezone] = useState(
     cachedTimezone ?? DEFAULT_SERVER_TIMEZONE,
   );
 
   useEffect(() => {
+    if (!enabled) return;
     void fetchServerTimezone().then(setTimezone);
-  }, []);
+  }, [enabled]);
 
   return timezone;
 }
