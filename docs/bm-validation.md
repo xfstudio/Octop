@@ -42,7 +42,7 @@ make all
 - Temporal Python SDK：2 项真实开发服务器测试通过，覆盖审批等待跨 worker 生命周期、Signal、Timer、`queued` 竞态，以及活动中断后更换 worker，恢复未确认写入为 `uncertain`，写适配器只调用一次。写适配器为合成实现，未执行真实业务写入。
 - `uv lock --check` 通过；wheel 构建及 `rna_bridge.mjs` 打包检查通过。
 
-最终安装包为 `dist/longterm/octop-1.0.2-py3-none-any.whl`（13976354 字节），SHA256 为 `dc1dd5ecb20fe1a9853b37dd62c79fae4b6e40706906ef563e0fb2f7b6c42c94`。包内长程后端、SQL 仓储、API、服务接线与当前源码逐字节一致，包含两种 migration 22、RNA bridge、更新品牌后的前端资源，且不包含旧 WebM 品牌动画；本任务临时容器与辅助进程已清理。
+本机运行验收安装包为 `dist/local-smoke/wheel/octop-1.0.2-py3-none-any.whl`（13976403 字节），SHA256 为 `74724c7b50d53ed089aab22e0d3304f3246bd8ba4aafa6b0592d4bec16d3e49d`。包内长程后端、SQL 仓储、API、服务接线与当前源码逐字节一致，包含两种 migration 22、RNA bridge、更新品牌后的前端资源，且不包含旧 WebM 品牌动画；本任务临时容器与辅助进程已清理。
 
 重跑 PostgreSQL 测试需提供允许创建测试数据库和角色的管理员 DSN；测试不会重置已有应用库：
 
@@ -68,6 +68,20 @@ uv run --no-sync pytest tests/unit/longterm/test_runtime_temporal_live.py -m liv
 - 桌面 `go test ./...` 通过；15 个桌面/FnOS/Linux PNG 的尺寸与透明度、Windows ICO 的 6 种尺寸及 macOS ICNS 解码通过。macOS 原生打包仍需对应系统工具链验收。
 - 统一生成器重复执行后，检查的 115 个图像、SVG、HTML 等文件内容无变化；生成器与壁纸 helper 的 Ruff 和格式检查通过。
 - 推送前只读检查未发现真实凭证、私钥、数据库、日志、缓存或临时数据混入新增文件。代码自定义改动集中在 `dev-musae`。
+
+## 本机编译与实际运行验收
+
+在 `dev-musae` 上重新执行本机编译、安装与运行，日志和测试数据位于忽略目录 `dist/local-smoke/`：
+
+- 前端 `npm run build`（含 TypeScript）通过；6 个专项文件的 27 项 Vitest 通过，PWA 预缓存 106 项。
+- 后端长程平台、数据库、权限、迁移、国际化与备份专项：431 passed、1 skipped、6 deselected。真实 Temporal 开发服务器：2 passed。
+- 新 wheel 通过 `uv pip install --no-deps --target dist/local-smoke/packages` 安装；运行时确认 `octop.__file__` 来自该安装目录。独立 `OCTOP_HOME=dist/local-smoke/runtime`，SQLite 与管理员均新建，监听 `127.0.0.1:8099`，原有 `8088` 服务保持运行。
+- 实际 HTTP 冒烟 24 项通过：JWT、租户与空间、BeatDesign 导入、显式上传下载、409 并发冲突、凭证拒绝、双节点本机执行、幂等命令、SSE 游标恢复、11 条有效哈希链记录，以及非成员和同租户私有数据隔离。非成员返回 403；同租户非所有者返回 404，避免透露私有资源是否存在。
+- 真实浏览器通过页面滑块和密码登录，完成 Canvas 本地预览与导入。发现并修复首次断网访问未访问过的 `/offline-workbench` 失败：现在单独预缓存离线入口 HTML，摘要覆盖 HTML 和当轮资源；普通页面仍使用 NetworkFirst，更新仍由用户确认。
+- 清除该测试源的 SW 与浏览器缓存，仅在线打开登录页安装资源，确认普通 HTML 缓存为空后断网首次进入离线入口，成功编辑并刷新恢复两节点配置；390px 视口无横向溢出。离线时初始化状态/应用清单等网络探测可能报告断网，不影响本地编辑。
+- Windows `go test -count=1 ./...` 通过，`go build -mod=readonly -trimpath -buildvcs=false -ldflags='-H windowsgui' -o bin/Octop-local-smoke.exe .` 成功。产物位于 `desktop/src/bin/Octop-local-smoke.exe`，为 Windows AMD64 开发桌面壳，本机 WebView2 可用。完整安装包仍需 Wails/NSIS 与 portable runtime。
+
+本机测试管理员为 `musae-local`，随机口令仅保存在忽略的 `dist/local-smoke/access.json`；不包含真实模型或云服务凭证。测试过程未调用付费模型。服务使用受管理终端前台运行，重启命令见本机 `dist/local-smoke/run-server.ps1`。
 
 ## 仍需独立验收
 

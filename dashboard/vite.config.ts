@@ -1,4 +1,4 @@
-import { webcrypto } from "node:crypto";
+import { createHash, webcrypto } from "node:crypto";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
@@ -194,13 +194,37 @@ export default defineConfig(({ mode }) => {
           "apple-touch-icon.png",
         ],
         workbox: {
-          // Precache hashed entry + vendor chunks. Do NOT precache index.html:
-          // Cache-First on the shell pins a stale HTML that points at deleted
-          // hashes after deploy (white screen until a hard refresh).
+          // Precache hashed chunks plus the public offline workbench shell.
+          // The transform below renames index.html, so ordinary navigations
+          // still use NetworkFirst rather than a pinned app shell.
           globPatterns: [
+            "index.html",
             "assets/index.*.js",
             "assets/vendor-*.js",
             "assets/*.{css,woff2}",
+          ],
+          manifestTransforms: [
+            (entries) => {
+              // Refresh the offline shell whenever its HTML or build assets
+              // change, including assets with content hashes in their URLs.
+              const revision = createHash("sha256")
+                .update(
+                  JSON.stringify(
+                    entries
+                      .map(({ url, revision }) => ({ url, revision }))
+                      .sort((a, b) => a.url.localeCompare(b.url)),
+                  ),
+                )
+                .digest("hex");
+              return {
+                manifest: entries.map((entry) =>
+                  entry.url === "index.html"
+                    ? { ...entry, url: "offline-workbench", revision }
+                    : entry,
+                ),
+                warnings: [],
+              };
+            },
           ],
           // vendor-antd (incl. the ColorPicker color engine) exceeds the
           // 2 MiB workbox default; raise the precache limit so it stays
