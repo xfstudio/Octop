@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+# The wrapper serves reports; it never starts a benchmark or a model request.
+FROM docker:29.6.1-cli@sha256:862099ada15c669000bef53aa4cb9d821262829f45b0dda2159ccb276443043b AS docker-client
+FROM python:3.13-slim@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    BENCHMARK_API_TOKEN_FILE=/run/stack-secrets/benchmark-token \
+    BENCHMARK_RESULTS_ROOT=/results \
+    BENCHMARK_PORT=8090
+WORKDIR /opt/benchmark
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=30 update \
+    && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=30 install -y --no-install-recommends bash ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 1000 benchmark \
+    && useradd --uid 1000 --gid 1000 --home-dir /results --shell /usr/sbin/nologin benchmark \
+    && mkdir -p /results \
+    && chown 1000:1000 /results
+# Preserve the source layout: upstream PROJECT_ROOT is derived from __file__.
+COPY --from=benchmark_src /pyproject.toml /README.md /LICENSE /LICENSE-DATA /THIRD_PARTY_NOTICES.md ./
+COPY --from=benchmark_src /bench_core/ ./bench_core/
+COPY --from=benchmark_src /datasets_domain_v1/ ./datasets_domain_v1/
+COPY --from=benchmark_src /configs/ ./configs/
+COPY --from=benchmark_src /scripts/ ./scripts/
+COPY --from=benchmark_src /docker/ ./docker/
+COPY --from=benchmark_src /real_replica_bench/ ./real_replica_bench/
+COPY --from=docker-client /usr/local/bin/docker /usr/local/bin/docker
+RUN pip install --no-cache-dir -e . \
+    && commerce-agent-bench list >/dev/null \
+    && ln -s /results /opt/benchmark/runs
+COPY docker/stack/benchmark_server.py /usr/local/bin/benchmark_server.py
+USER 1000:1000
+EXPOSE 8090
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 \
+    CMD python -c "import json,urllib.request; r=json.load(urllib.request.urlopen('http://127.0.0.1:8090/health',timeout=3)); raise SystemExit(0 if r.get('status')=='ok' else 1)"
+ENTRYPOINT ["python", "/usr/local/bin/benchmark_server.py"]

@@ -98,7 +98,7 @@ class ComponentConsoleResponse(BaseModel):
 class ComponentRuntimeResponse(BaseModel):
     component_id: str
     name: str
-    mode: Literal["embedded", "external", "compose", "process"]
+    mode: Literal["embedded", "external", "compose", "docker", "process"]
     state: Literal[
         "enabled", "disabled", "running", "stopped", "partial", "starting", "stopping", "unknown"
     ]

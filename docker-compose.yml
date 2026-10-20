@@ -1,0 +1,281 @@
+# Unified MUSAE stack. From this directory: docker compose up -d --build
+# Source checkouts default to the existing sibling projects; see docker/README.stack.md.
+name: ${COMPOSE_PROJECT_NAME:-musae}
+
+x-octop-build: &octop-build
+  context: .
+  dockerfile: docker/Dockerfile
+  target: stack
+  additional_contexts:
+    rna_src: ${RNA_SOURCE:-../rna_dev}
+    semantica_src: ${SEMANTICA_SOURCE:-../semantica}
+
+x-octop-environment: &octop-environment
+  HOME: /data
+  OCTOP_HOME: /data/.octop
+  OCTOP_BIND_HOST: 0.0.0.0
+  OCTOP_PORT: "8088"
+  OCTOP_DATABASE_DRIVER: postgresql
+  OCTOP_DATABASE_URL: ""
+  OCTOP_DATABASE_HOST: postgres
+  OCTOP_DATABASE_PORT: "5432"
+  OCTOP_DATABASE_NAME: octop
+  OCTOP_DATABASE_USER: octop
+  OCTOP_TEMPORAL_ADDRESS: temporal:7233
+  OCTOP_TEMPORAL_NAMESPACE: default
+  OCTOP_TEMPORAL_TASK_QUEUE: octop-longterm
+  OCTOP_BEATDESIGN_MCP_URL: http://beatdesign:3031/mcp
+  OCTOP_RNA_URL: http://rna:4317
+  OCTOP_HINDSIGHT_URL: http://hindsight:8888
+  OCTOP_BENCH_RESULTS_ROOT: /results
+  OCTOP_EVOLUTION_REPORTS_ROOT: /data/.octop/longterm/evolution-reports
+  OCTOP_COMPONENT_RUNTIME_FILE: /stack-config/component-runtime.json
+
+services:
+  init:
+    image: musae-stack-init:dev
+    build:
+      context: .
+      dockerfile: docker/stack/Dockerfile.init
+    restart: "no"
+    environment:
+      STACK_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-musae}
+      STACK_PUBLIC_HOST: ${MUSAE_PUBLIC_HOST:-localhost}
+      STACK_TEMPORAL_PORT: ${MUSAE_TEMPORAL_UI_PORT:-8233}
+      STACK_BEATDESIGN_PORT: ${MUSAE_BEATDESIGN_PORT:-3020}
+      STACK_RNA_PORT: ${MUSAE_RNA_PORT:-4317}
+      STACK_SEMANTICA_PORT: ${MUSAE_SEMANTICA_PORT:-8800}
+      STACK_HINDSIGHT_PORT: ${MUSAE_HINDSIGHT_UI_PORT:-9998}
+      STACK_COMMERCEAGENTBENCH_PORT: ${MUSAE_BENCHMARK_PORT:-8091}
+    volumes:
+      - octop_secrets:/secrets/octop
+      - postgres_secrets:/secrets/postgres
+      - beatdesign_secrets:/secrets/beatdesign
+      - rna_secrets:/secrets/rna
+      - semantica_secrets:/secrets/semantica
+      - hindsight_secrets:/secrets/hindsight
+      - benchmark_secrets:/secrets/benchmark
+      - stack_config:/stack-config
+
+  postgres:
+    image: musae-postgres:dev
+    build:
+      context: .
+      dockerfile: docker/stack/Dockerfile.postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: octop_bootstrap
+      POSTGRES_DB: octop
+      POSTGRES_PASSWORD_FILE: /run/stack-secrets/bootstrap-password
+    volumes:
+      - control_db:/var/lib/postgresql/data
+      - postgres_secrets:/run/stack-secrets:ro
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -p 5432 >/dev/null && psql -U octop_bootstrap -d octop -Atqc \"SELECT 1 FROM pg_roles WHERE rolname = 'octop' AND NOT rolsuper AND NOT rolbypassrls\" | grep -qx 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  octop:
+    image: musae-octop:dev
+    build: *octop-build
+    init: true
+    restart: unless-stopped
+    environment:
+      <<: *octop-environment
+      OCTOP_ADMIN_USERNAME: ${OCTOP_ADMIN_USERNAME:-admin}
+      # Recreate the cached-manifest reader when public console links change.
+      STACK_CONSOLE_HOST: ${MUSAE_PUBLIC_HOST:-localhost}
+      STACK_CONSOLE_PORTS: ${MUSAE_TEMPORAL_UI_PORT:-8233},${MUSAE_BEATDESIGN_PORT:-3020},${MUSAE_RNA_PORT:-4317},${MUSAE_SEMANTICA_PORT:-8800},${MUSAE_HINDSIGHT_UI_PORT:-9998},${MUSAE_BENCHMARK_PORT:-8091}
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    ports:
+      - "127.0.0.1:${MUSAE_PORT:-8088}:8088"
+    volumes:
+      - octop_data:/data/.octop
+      - octop_secrets:/run/stack-secrets:ro
+      - stack_config:/stack-config:ro
+      - benchmark_results:/results
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://127.0.0.1:8088/api/health]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 10
+
+  temporal:
+    image: temporalio/temporal:1.5.1@sha256:597a5dbbcc6e7716b326dde4a51622d5ea0879eb0cf06ff8a94381361d0a987d
+    init: true
+    restart: unless-stopped
+    command: [server, start-dev, --ip, 0.0.0.0, --port, "7233", --ui-port, "8233", --db-filename, /home/temporal/temporal.db]
+    ports:
+      - "127.0.0.1:${MUSAE_TEMPORAL_PORT:-7233}:7233"
+      - "127.0.0.1:${MUSAE_TEMPORAL_UI_PORT:-8233}:8233"
+    volumes:
+      - temporal_data:/home/temporal
+    healthcheck:
+      test: [CMD, temporal, operator, cluster, health, --address, 127.0.0.1:7233]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 15
+
+  worker:
+    image: musae-octop:dev
+    build: *octop-build
+    init: true
+    restart: unless-stopped
+    command: [worker]
+    environment:
+      <<: *octop-environment
+      OCTOP_LONGTERM_WORKER: "1"
+    volumes:
+      - octop_data:/data/.octop
+      - octop_secrets:/run/stack-secrets:ro
+      - stack_config:/stack-config:ro
+      - benchmark_results:/results
+    depends_on:
+      octop:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, /app/.venv/bin/python, /usr/local/bin/stack_bootstrap.py, worker-health]
+      interval: 20s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+
+  beatdesign:
+    image: musae-beatdesign:dev
+    build:
+      context: .
+      dockerfile: docker/stack/Dockerfile.beatdesign
+      additional_contexts:
+        beatdesign_src: ${BEATDESIGN_SOURCE:-../BeatDesign}
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      BEATDESIGN_PUBLIC_ORIGIN: http://${MUSAE_PUBLIC_HOST:-localhost}:${MUSAE_BEATDESIGN_PORT:-3020}
+    ports:
+      - "127.0.0.1:${MUSAE_BEATDESIGN_PORT:-3020}:3020"
+      - "127.0.0.1:${MUSAE_BEATDESIGN_MCP_PORT:-3031}:3031"
+    volumes:
+      - beatdesign_data:/var/lib/beatdesign
+      - beatdesign_secrets:/run/stack-secrets:ro
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  rna:
+    image: musae-rna:dev
+    build:
+      context: .
+      dockerfile: docker/stack/Dockerfile.rna
+      additional_contexts:
+        rna_src: ${RNA_SOURCE:-../rna_dev}
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      RNA_PUBLIC_ORIGIN: http://${MUSAE_PUBLIC_HOST:-localhost}:${MUSAE_RNA_PORT:-4317}
+    ports:
+      - "127.0.0.1:${MUSAE_RNA_PORT:-4317}:4317"
+    volumes:
+      - rna_data:/var/lib/rna
+      - rna_secrets:/run/stack-secrets:ro
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  semantica:
+    image: musae-semantica:dev
+    build:
+      context: .
+      dockerfile: docker/stack/Dockerfile.semantica
+      additional_contexts:
+        semantica_src: ${SEMANTICA_SOURCE:-../semantica}
+    init: true
+    restart: unless-stopped
+    environment:
+      SEMANTICA_PROVENANCE_DB: /data/semantica/explorer.sqlite
+      ALLOWED_ORIGINS: http://${MUSAE_PUBLIC_HOST:-localhost}:${MUSAE_SEMANTICA_PORT:-8800},http://127.0.0.1:${MUSAE_SEMANTICA_PORT:-8800}
+    ports:
+      - "127.0.0.1:${MUSAE_SEMANTICA_PORT:-8800}:8000"
+    volumes:
+      - semantica_data:/data/semantica
+      - semantica_secrets:/run/stack-secrets:ro
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  hindsight:
+    image: musae-hindsight:dev
+    build:
+      context: .
+      dockerfile: docker/stack/Dockerfile.hindsight
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    environment:
+      HINDSIGHT_API_LLM_PROVIDER: none
+      HINDSIGHT_API_STARTUP_WAIT_SECONDS: "600"
+    ports:
+      - "127.0.0.1:${MUSAE_HINDSIGHT_API_PORT:-8888}:8888"
+      - "127.0.0.1:${MUSAE_HINDSIGHT_UI_PORT:-9998}:9999"
+    volumes:
+      - hindsight_data:/home/hindsight/.pg0
+      - hindsight_secrets:/run/stack-secrets:ro
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  commerceagentbench:
+    image: musae-benchmark:dev
+    build:
+      context: .
+      dockerfile: docker/stack/Dockerfile.benchmark
+      additional_contexts:
+        benchmark_src: ${BENCHMARK_SOURCE:-../CommerceAgentBench}
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MUSAE_BENCHMARK_PORT:-8091}:8090"
+    volumes:
+      - benchmark_results:/results:ro
+      - benchmark_secrets:/run/stack-secrets:ro
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+volumes:
+  control_db:
+  octop_data:
+  temporal_data:
+  beatdesign_data:
+  rna_data:
+  semantica_data:
+  hindsight_data:
+  benchmark_results:
+  octop_secrets:
+  postgres_secrets:
+  beatdesign_secrets:
+  rna_secrets:
+  semantica_secrets:
+  hindsight_secrets:
+  benchmark_secrets:
+  stack_config:

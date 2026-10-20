@@ -62,7 +62,7 @@ export type ComponentLifecycleAction = "start" | "stop";
 export interface ComponentRuntime {
   component_id: ManagedComponentId;
   name: string;
-  mode: "embedded" | "compose" | "process" | "external";
+  mode: "embedded" | "compose" | "docker" | "process" | "external";
   state:
     | "enabled"
     | "disabled"

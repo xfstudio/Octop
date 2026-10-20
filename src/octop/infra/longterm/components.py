@@ -485,7 +485,10 @@ class ComponentManager:
                     )
                     namespace_check["ok"] = True
                     return await worker_is_polling(
-                        client, namespace=values["namespace"], task_queue=values["task_queue"]
+                        client,
+                        namespace=values["namespace"],
+                        task_queue=values["task_queue"],
+                        local_only=False,
                     )
 
                 await run("temporal_worker", temporal_probe)

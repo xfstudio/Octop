@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1
+# Build with --build-context rna_src=../rna_dev (or a pinned Git URL).
+ARG NODE_IMAGE=node:24-bookworm-slim
+FROM ${NODE_IMAGE} AS apt-base
+# This build-only helper verifies signed APT metadata and each package SHA256;
+# parallel HTTPS downloads avoid serial CDN throttling. It is never copied.
+RUN --mount=type=bind,source=docker/stack/install-debian-packages.mjs,target=/tmp/install-debian-packages.mjs,readonly \
+    node /tmp/install-debian-packages.mjs --prepare
+
+FROM ${NODE_IMAGE} AS web-build
+WORKDIR /build/web
+COPY --from=rna_src /prototypes/control-center/web/package.json /prototypes/control-center/web/package-lock.json ./
+RUN npm ci
+COPY --from=rna_src /prototypes/control-center/web/src ./src
+COPY --from=rna_src /prototypes/control-center/web/public ./public
+COPY --from=rna_src /prototypes/control-center/web/index.html /prototypes/control-center/web/vite.config.ts /prototypes/control-center/web/tsconfig.json ./
+RUN npm run build
+
+FROM apt-base AS host-build
+WORKDIR /build/host
+RUN --mount=type=bind,source=docker/stack/install-debian-packages.mjs,target=/tmp/install-debian-packages.mjs,readonly \
+    node /tmp/install-debian-packages.mjs python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=rna_src /prototypes/control-center/package.json /prototypes/control-center/package-lock.json ./
+RUN npm ci --omit=dev
+
+FROM apt-base AS runtime
+ENV NODE_ENV=production RNA_AGENT_STATE=/var/lib/rna/state.json RNA_AGENT_TOKEN_FILE=/run/stack-secrets/rna-token
+WORKDIR /app/prototypes/control-center
+RUN --mount=type=bind,source=docker/stack/install-debian-packages.mjs,target=/tmp/install-debian-packages.mjs,readonly \
+    node /tmp/install-debian-packages.mjs git ca-certificates util-linux \
+    && rm -rf /var/lib/apt/lists/* && mkdir -p /var/lib/rna && chown node:node /var/lib/rna
+COPY --from=rna_src /prototypes/control-center/*.mjs ./
+COPY --from=rna_src /prototypes/control-center/package.json ./
+COPY --from=rna_src /prototypes/control-center/api-error-catalog/*.mjs ./api-error-catalog/
+COPY --from=rna_src /prototypes/control-center/presentation/*.mjs ./presentation/
+COPY --from=rna_src /prototypes/control-center/git-isolation/*.mjs ./git-isolation/
+COPY --from=rna_src /prototypes/control-center/benchmark/*.mjs ./benchmark/
+COPY --from=rna_src /packages/sdk/package.json /app/packages/sdk/
+COPY --from=rna_src /packages/sdk/src /app/packages/sdk/src
+COPY --from=rna_src /packages/sdk/skills /app/packages/sdk/skills
+COPY --from=rna_src /LICENSE /app/LICENSE
+COPY --from=host-build /build/host/node_modules ./node_modules
+COPY --from=web-build /build/web/dist ./web/dist
+COPY docker/stack/rna-entry.mjs docker/stack/beatdesign-loopback-proxy.mjs /app/stack/
+USER node
+EXPOSE 4317
+HEALTHCHECK --interval=20s --timeout=5s --start-period=30s CMD ["node", "--input-type=module", "-e", "const r = await fetch('http://127.0.0.1:4317/api/health'); if (!r.ok) process.exit(1)"]
+CMD ["node", "/app/stack/rna-entry.mjs"]

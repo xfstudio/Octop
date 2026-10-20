@@ -24,7 +24,7 @@ import serviceStyles from "./index.module.less";
 
 const prefix = "componentCenter.services";
 const managedProcess = (mode: ComponentRuntime["mode"]) =>
-  mode === "compose" || mode === "process";
+  mode === "compose" || mode === "docker" || mode === "process";
 
 function consoleHref(runtime: ComponentRuntime): string | null {
   if (!runtime.console.available || !runtime.console.url) return null;

@@ -213,6 +213,7 @@
     "modes": {
       "embedded": "Runtime: embedded Octop integration",
       "compose": "Runtime: managed Compose services",
+      "docker": "Runtime: unified container stack",
       "process": "Runtime: managed local processes",
       "external": "Runtime: external service"
     },

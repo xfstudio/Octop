@@ -198,7 +198,13 @@ async def test_private_python_process_stops_on_request_and_close_without_adoptin
         {
             "semantica": {
                 "mode": "process",
-                "argv": [sys.executable, str(script), str(marker)],
+                # Windows venv launchers can exit as soon as taskkill kills their
+                # child, making taskkill return 255 despite terminating the tree.
+                "argv": [
+                    getattr(sys, "_base_executable", sys.executable),
+                    str(script),
+                    str(marker),
+                ],
                 "cwd": str(tmp_path),
                 "env": {"OCTOP_RUNTIME_TEST_VALUE": "private-test"},
             }

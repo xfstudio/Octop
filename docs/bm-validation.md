@@ -108,10 +108,22 @@ uv run --no-sync pytest tests/unit/longterm/test_runtime_temporal_live.py -m liv
 - 浏览器通过“确认启动→打开原生控制台新标签→确认停止”的真实流程，控制台链接包含 `noopener noreferrer`；验证后台和工作台双向导航。390px 视口和文档宽度均为 390px，七卡片运行信息无横向溢出；恢复 1440px 视口后无页面脚本错误。
 - 最终 PWA 预缓存 **255 项，约 15.96 MiB**，包含新管理页面及全部 JavaScript 分块。全新浏览器环境只在线访问登录页，等待 SW 激活、清空 HTTP 缓存后断网，首次进入未访问过的离线工作台成功，无页面脚本错误。最终 wheel 位于 `dist/local-smoke/component-runtime-final-wheel/octop-1.0.2-py3-none-any.whl`，14034335 字节，SHA256 `bd2d2054d92caf5864f494d481751cfdd88861a337a688fe1923fa6e628badb7`；独立安装目录为 `dist/local-smoke/component-runtime-final-packages`。8099 继续使用原专用测试数据，8088 原服务保持可用。
 
-真正的进程启停只对宿主可信清单绑定的 `process`/`compose` 生效；内嵌 SDK、批处理结果适配器及未托管远端只提供集成开关，停用不撤销已经派发的操作。上游控制台保留自己的认证，未配置地址时进入 Octop 集成控制台。部署方法与已知边界见 [组件生命周期说明](component-runtime.md)。
+真正的服务启停只对宿主可信清单绑定的 `process`/`compose`/`docker` 生效；内嵌 SDK、批处理结果适配器及未托管远端只提供集成开关，停用不撤销已经派发的操作。上游控制台保留自己的认证，未配置地址时进入 Octop 集成控制台。部署方法与已知边界见 [组件生命周期说明](component-runtime.md)。
+
+## 单文件容器栈验证（2026-10-21）
+
+根目录 `docker-compose.yml` 默认启动全部服务，不依赖额外 Compose 文件或 profiles；启动方法、源码版本、密码读取和功能边界见 [统一容器部署](../docker/README.stack.md)。本机使用独立项目 `musae-unified-smoke`，主程序端口为 18088，原有 8088/8099 服务保留。
+
+- 最终源码完整 `make all` 通过：**5098 passed、226 skipped、18 warnings**，耗时 2600.74 秒；Ruff、格式检查与 616 个源文件的 mypy 通过。warning 为既有依赖弃用及 Windows 浏览器安装测试子进程解码提示。统一栈专项 **20 passed**，Temporal poller 与组件探测专项 **40 passed**；`docker/stack` 的全部 Python 文件单独通过 Ruff 与格式检查。
+- BeatDesign 和 RNA 的生产镜像通过真实页面、静态资源、Basic/Bearer、匿名拒绝、来源校验、内部 DNS、数据重启和正常退出验证；BeatDesign MCP 初始化及工具目录可读，RNA 原生终端能执行合成输出。未提交生成任务或载入宿主 RNA 状态。
+- Semantica Explorer 实际写入独立 SQLite 存证并通过其 API 回读，重启后仍可读取；页面和私有 API 的鉴权通过。Octop 中的租户 SDK 存证与 Explorer 独立数据卷保持各自授权范围。
+- Hindsight 固定官方镜像，在未配置云模型密钥及 Hugging Face 离线环境中，通过真实 Next 控制台、服务端鉴权转发、Basic/Bearer、记忆 retain/recall、重启持久化及 45 秒内正常退出验证。默认 `none` 仅提供 chunks 记忆；Reflect 仍需实际 LLM。
+- CommerceAgentBench 实际 CLI 目录、只读报告索引及认证通过；报告读取拒绝路径穿越、符号链接和特殊文件。未执行付费基准或 judge。PostgreSQL 应用角色实际为 `NOSUPERUSER/NOBYPASSRLS`，Linux 凭据目录和文件权限、重启复用检查通过，未输出口令。
+- 通过根 Compose 的 `up -d --build --wait --wait-timeout 900`，九个长驻服务均达到 healthy，初始化器正常退出 0。最终镜像的 **64 项实际 HTTP 检查全部通过**：包括七组件连接检查、本机与 Temporal 的实际 echo 执行、输出校验、有效证据哈希链、完整 Semantica 索引回读、普通租户拒绝管理宿主服务，以及六个外部组件的真实停止、过期版本 409、启动和健康恢复。Temporal 条目同时管理 worker，停止期间 Octop 控制面持续可用。
+- 整栈联调发现并修复 Temporal 连接检查误报：后台应接受所配置队列上的远端 worker，worker 自身健康检查仍须匹配本容器身份。浏览器确认容器生产登录页、离线工作台及七组件入口可渲染；认证后的后台生命周期使用上述真实 HTTP 验收。
 
 ## 仍需独立验收
 
-Semantica 真实本地源码的 SQLite 写入与回读已验证；RNA 真实 SDK 通过本机合成 SSE 服务验证。Hindsight/BeatDesign 远端服务、真实模型、CommerceAgentBench 付费完整运行、生产 Temporal 集群及整套 Docker 镜像端到端尚未验证。
+真实模型、CommerceAgentBench 付费完整运行、生产 Temporal 集群仍需独立验收。RNA 上游前端锁文件的依赖审计仍报告 1 项 high，本轮保留上游锁文件，尚未完成该依赖升级验证。
 
 当前 agent 执行使用冻结技能与模型进行无工具分析。R1/R2 具体业务写入适配器、实际候选发布器、Shadow/Canary 运行、经营收益归因、WORM/外部时间戳、灾难恢复仍需逐项完成；候选状态迁移不等同于已部署新行为。组件接线与配置详见 [BM 平台说明](bm-platform.md) 和 [开发部署说明](../docker/README.longterm.md)。

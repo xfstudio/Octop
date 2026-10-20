@@ -20,6 +20,8 @@ from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+import httpx
+
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.longterm.components import NAMES, ComponentManager
 from octop.infra.users.identity import User
@@ -34,6 +36,10 @@ _INTERNAL = {
     "rna": "/workbench/platform?section=integrations",
 }
 _NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$")
+_PROJECT = re.compile(r"^[a-z0-9][a-z0-9_-]{0,99}$")
+_CONTAINER_ID = re.compile(r"^[0-9a-f]{64}$")
+_STOPPED = {"exited", "created", "dead"}
+_DOCKER_STATES = _STOPPED | {"running", "paused", "restarting", "removing"}
 
 
 def _error(reason: str, status: int = 422) -> OctopError:
@@ -98,6 +104,19 @@ def _read_manifest() -> dict[str, dict[str, Any]]:
                     or any(not isinstance(n, str) or not _NAME.fullmatch(n) for n in names)
                 ):
                     raise ValueError("invalid compose selection")
+        elif mode == "docker":
+            allowed |= {"project_name", "services"}
+            project = entry.get("project_name")
+            names = entry.get("services")
+            if not isinstance(project, str) or not _PROJECT.fullmatch(project):
+                raise ValueError("invalid compose project")
+            if (
+                not isinstance(names, list)
+                or not 1 <= len(names) <= 20
+                or any(not isinstance(n, str) or not _NAME.fullmatch(n) for n in names)
+                or len(set(names)) != len(names)
+            ):
+                raise ValueError("invalid docker selection")
         elif mode == "process":
             allowed |= {"argv", "cwd", "env"}
             argv = entry.get("argv")
@@ -130,8 +149,48 @@ def _read_manifest() -> dict[str, dict[str, Any]]:
     return entries
 
 
+class UnixDockerAPI:
+    """A fixed-version Docker API over a host-configured Unix socket only."""
+
+    def __init__(self) -> None:
+        socket = os.environ.get("OCTOP_DOCKER_SOCKET", "/var/run/docker.sock")
+        if not socket.startswith("/") or "\x00" in socket:
+            raise _error("runtime_unavailable", 503)
+        self.client = httpx.AsyncClient(
+            transport=httpx.AsyncHTTPTransport(uds=socket),
+            base_url="http://docker/v1.45/",
+            timeout=httpx.Timeout(45, connect=3),
+            trust_env=False,
+            follow_redirects=False,
+        )
+
+    async def __aenter__(self) -> UnixDockerAPI:
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        await self.client.aclose()
+
+    async def request(self, method: str, path: str, *, params: dict[str, Any] | None = None) -> Any:
+        try:
+            async with self.client.stream(method, path, params=params) as response:
+                if response.status_code not in ({200} if method == "GET" else {204, 304}):
+                    raise _error("runtime_command_failed", 503)
+                if method != "GET":
+                    return None
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > 1048576:
+                        raise _error("runtime_observation_failed", 503)
+                return json.loads(body)
+        except httpx.TimeoutException as exc:
+            raise _error("runtime_timeout", 504) from exc
+        except (httpx.HTTPError, OSError, ValueError) as exc:
+            raise _error("runtime_command_failed", 503) from exc
+
+
 class ComponentRuntimeManager:
-    """Process handles are private to one controller; Compose supports shared hosts."""
+    """Process handles are private; Compose and Docker support shared controllers."""
 
     def __init__(self, components: ComponentManager) -> None:
         self.components = components
@@ -200,11 +259,13 @@ class ComponentRuntimeManager:
         reason: str | None = "runtime_external" if mode == "external" else "runtime_embedded"
         services: list[dict[str, Any]] = []
         can_start, can_stop = not values["enabled"], bool(values["enabled"])
-        if mode in {"process", "compose"}:
+        if mode in {"process", "compose", "docker"}:
             reason = None
             try:
                 if mode == "compose":
                     state, services = await self._observe_compose(entry)
+                elif mode == "docker":
+                    state, services = await self._observe_docker(entry)
                 else:
                     proc = self._processes.get(component_id)
                     if proc is not None:
@@ -225,6 +286,9 @@ class ComponentRuntimeManager:
                 state, reason = "unknown", "runtime_observation_failed"
             can_start = state == "stopped"
             can_stop = state in {"running", "partial"}
+            if mode == "docker" and state == "partial":
+                can_start = any(s["state"] in _STOPPED for s in services)
+                can_stop = any(s["state"] in {"running", "paused", "restarting"} for s in services)
         if record.get("pending"):
             if record.get("expires_at", 0) > time.time():
                 state = "starting" if record["pending"] == "start" else "stopping"
@@ -344,6 +408,109 @@ class ComponentRuntimeManager:
         )
         return ("running" if ready and running == set(entry["services"]) else "partial"), services
 
+    @staticmethod
+    async def _docker_containers(api: UnixDockerAPI, entry: dict[str, Any]) -> list[dict[str, Any]]:
+        """Discover every bound service and verify immutable IDs before any mutation."""
+        containers: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for service in entry["services"]:
+            labels = {
+                "com.docker.compose.project": entry["project_name"],
+                "com.docker.compose.service": service,
+            }
+            rows = await api.request(
+                "GET",
+                "containers/json",
+                params={
+                    "all": "true",
+                    "filters": json.dumps({"label": [f"{k}={v}" for k, v in labels.items()]}),
+                },
+            )
+            if not isinstance(rows, list) or not rows or len(rows) > 100:
+                raise _error("runtime_observation_failed", 503)
+            for row in rows:
+                if not isinstance(row, dict):
+                    raise _error("runtime_observation_failed", 503)
+                container_id = row.get("Id")
+                if (
+                    not isinstance(container_id, str)
+                    or not _CONTAINER_ID.fullmatch(container_id)
+                    or container_id in seen
+                ):
+                    raise _error("runtime_observation_failed", 503)
+                seen.add(container_id)
+                inspected = await api.request("GET", f"containers/{container_id}/json")
+                if not isinstance(inspected, dict) or inspected.get("Id") != container_id:
+                    raise _error("runtime_observation_failed", 503)
+                config = inspected.get("Config")
+                actual = config.get("Labels") if isinstance(config, dict) else None
+                if (
+                    not isinstance(actual, dict)
+                    or any(actual.get(k) != v for k, v in labels.items())
+                    or not isinstance(actual.get("com.docker.compose.oneoff"), str)
+                    or actual["com.docker.compose.oneoff"].lower() != "false"
+                ):
+                    raise _error("runtime_observation_failed", 503)
+                state = inspected.get("State")
+                if (
+                    not isinstance(state, dict)
+                    or not isinstance(state.get("Status"), str)
+                    or state["Status"] not in _DOCKER_STATES
+                ):
+                    raise _error("runtime_observation_failed", 503)
+                health = state.get("Health")
+                health = health.get("Status") if isinstance(health, dict) else None
+                containers.append(
+                    {
+                        "id": container_id,
+                        "name": service,
+                        "state": state["Status"],
+                        "health": health
+                        if isinstance(health, str)
+                        and health in {"healthy", "unhealthy", "starting"}
+                        else None,
+                    }
+                )
+        return containers
+
+    async def _observe_docker(self, entry: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+        try:
+            async with asyncio.timeout(25), UnixDockerAPI() as api:
+                containers = await self._docker_containers(api, entry)
+        except TimeoutError as exc:
+            raise _error("runtime_timeout", 504) from exc
+        services = [{k: c[k] for k in ("name", "state", "health")} for c in containers]
+        if all(s["state"] == "running" for s in services):
+            return "running", services
+        if all(s["state"] in _STOPPED for s in services):
+            return "stopped", services
+        return "partial", services
+
+    async def _operate_docker(self, entry: dict[str, Any], user: User, action: str) -> None:
+        try:
+            # Finish before the durable 90-second claim can expire, including two
+            # ordered 30-second graceful stops for Temporal and its worker.
+            async with asyncio.timeout(75), UnixDockerAPI() as api:
+                containers = await self._docker_containers(api, entry)
+                services = entry["services"] if action == "start" else reversed(entry["services"])
+                for service in services:
+                    selected = sorted(
+                        (c for c in containers if c["name"] == service), key=lambda c: c["id"]
+                    )
+                    for container in selected:
+                        await self._io(self._authorize, user)
+                        if self._closed:
+                            raise _error("runtime_unavailable", 503)
+                        await api.request(
+                            "POST",
+                            f"containers/{container['id']}/{action}",
+                            params={"t": "40" if service == "hindsight" else "30"}
+                            if action == "stop"
+                            else None,
+                        )
+        except TimeoutError as exc:
+            raise _error("runtime_timeout", 504) from exc
+
     async def lifecycle(
         self, component_id: str, user: User, *, action: str, confirmed: bool, expected_revision: int
     ) -> dict[str, Any]:
@@ -418,6 +585,8 @@ class ComponentRuntimeManager:
                     else ["stop", "--timeout", "10"]
                 )
                 await self._command(self._compose(entry) + command + entry["services"])
+            elif row["mode"] == "docker":
+                await self._operate_docker(entry, user, action)
             elif row["mode"] == "process":
                 if action == "start":
                     proc = await asyncio.create_subprocess_exec(

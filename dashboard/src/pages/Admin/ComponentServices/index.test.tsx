@@ -179,88 +179,205 @@ describe("component services administration", () => {
     ).toBeDisabled();
   });
 
-  it("distinguishes managed processes, integrations, external capabilities and console types", async () => {
-    vi.mocked(componentManagementApi.runtime).mockResolvedValue({
+  it.each(["compose", "docker"] as const)(
+    "distinguishes %s managed processes, integrations, external capabilities and console types",
+    async (mode) => {
+      vi.mocked(componentManagementApi.runtime).mockResolvedValue({
+        components: IDS.map((id) =>
+          runtime(
+            id,
+            id === "temporal"
+              ? {
+                  mode,
+                  state: "running",
+                  reason: null,
+                  services: [
+                    { name: "temporal", state: "running", health: "healthy" },
+                  ],
+                  console: {
+                    url: "http://localhost:8233/",
+                    kind: "external",
+                    label: "native",
+                    available: true,
+                  },
+                }
+              : id === "rna"
+              ? {
+                  mode: "process",
+                  state: "stopped",
+                  can_start: true,
+                  can_stop: false,
+                }
+              : id === "hindsight"
+              ? {
+                  mode: "external",
+                  state: "unknown",
+                  can_start: false,
+                  can_stop: false,
+                  reason: "runtime_external",
+                }
+              : {},
+          ),
+        ),
+      });
+      render(page());
+      expect(
+        await card("semantica").findByRole("button", {
+          name: "Semantica componentCenter.services.disable",
+        }),
+      ).toBeEnabled();
+      expect(
+        card("temporal").getByRole("button", {
+          name: "Temporal componentCenter.services.stop",
+        }),
+      ).toBeEnabled();
+      expect(
+        card("rna").getByRole("button", {
+          name: "RNA componentCenter.services.start",
+        }),
+      ).toBeEnabled();
+      expect(
+        card("rna").getByRole("button", {
+          name: "RNA componentCenter.services.stop",
+        }),
+      ).toBeDisabled();
+      expect(
+        card("hindsight").getByRole("button", {
+          name: "Hindsight componentCenter.services.disable",
+        }),
+      ).toBeDisabled();
+      expect(
+        document.querySelectorAll("[data-service-component]"),
+      ).toHaveLength(7);
+      const nativeLink = card("temporal").getByRole("link", {
+        name: "componentCenter.services.nativeConsole",
+      });
+      expect(nativeLink).toHaveAttribute("target", "_blank");
+      expect(nativeLink).toHaveAttribute("rel", "noopener noreferrer");
+      expect(
+        card("semantica").getByRole("link", {
+          name: "componentCenter.services.integrationConsole",
+        }),
+      ).toHaveAttribute("href", "/workbench/platform?section=integrations");
+      expect(
+        screen.getByRole("link", {
+          name: "componentCenter.services.workbench",
+        }),
+      ).toHaveAttribute("href", "/workbench/platform?section=integrations");
+      expect(
+        card("temporal").getByRole("list", {
+          name: "componentCenter.services.serviceList",
+        }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("confirms Docker start and stop separately and refreshes observed state and revisions", async () => {
+    const user = userEvent.setup();
+    const snapshot = (state: "stopped" | "running", revision: number) => ({
       components: IDS.map((id) =>
         runtime(
           id,
           id === "temporal"
             ? {
-                mode: "compose",
-                state: "running",
+                mode: "docker",
+                state,
+                revision,
+                can_start: state === "stopped",
+                can_stop: state === "running",
                 reason: null,
                 services: [
-                  { name: "temporal", state: "running", health: "healthy" },
+                  { name: "temporal", state, health: null },
+                  { name: "worker", state, health: null },
                 ],
-                console: {
-                  url: "http://localhost:8233/",
-                  kind: "external",
-                  label: "native",
-                  available: true,
-                },
-              }
-            : id === "rna"
-            ? {
-                mode: "process",
-                state: "stopped",
-                can_start: true,
-                can_stop: false,
-              }
-            : id === "hindsight"
-            ? {
-                mode: "external",
-                state: "unknown",
-                can_start: false,
-                can_stop: false,
-                reason: "runtime_external",
               }
             : {},
         ),
       ),
     });
-    render(page());
-    expect(
-      await card("semantica").findByRole("button", {
-        name: "Semantica componentCenter.services.disable",
-      }),
-    ).toBeEnabled();
-    expect(
-      card("rna").getByRole("button", {
-        name: "RNA componentCenter.services.start",
-      }),
-    ).toBeEnabled();
-    expect(
-      card("rna").getByRole("button", {
-        name: "RNA componentCenter.services.stop",
-      }),
-    ).toBeDisabled();
-    expect(
-      card("hindsight").getByRole("button", {
-        name: "Hindsight componentCenter.services.disable",
-      }),
-    ).toBeDisabled();
-    expect(document.querySelectorAll("[data-service-component]")).toHaveLength(
-      7,
+    vi.mocked(componentManagementApi.runtime)
+      .mockResolvedValueOnce(snapshot("stopped", 7))
+      .mockResolvedValueOnce(snapshot("running", 8))
+      .mockResolvedValueOnce(snapshot("stopped", 9));
+    // Lifecycle acknowledgements do not replace the subsequent runtime observation.
+    vi.mocked(componentManagementApi.lifecycle).mockResolvedValue(
+      runtime("temporal", { mode: "docker", state: "unknown" }),
     );
-    const nativeLink = card("temporal").getByRole("link", {
-      name: "componentCenter.services.nativeConsole",
-    });
-    expect(nativeLink).toHaveAttribute("target", "_blank");
-    expect(nativeLink).toHaveAttribute("rel", "noopener noreferrer");
-    expect(
-      card("semantica").getByRole("link", {
-        name: "componentCenter.services.integrationConsole",
+    render(page());
+    await user.click(
+      await card("temporal").findByRole("button", {
+        name: "Temporal componentCenter.services.start",
       }),
-    ).toHaveAttribute("href", "/workbench/platform?section=integrations");
+    );
     expect(
-      screen.getByRole("link", { name: "componentCenter.services.workbench" }),
-    ).toHaveAttribute("href", "/workbench/platform?section=integrations");
-    expect(
-      card("temporal").getByRole("list", {
-        name: "componentCenter.services.serviceList",
-      }),
+      screen.getByText("componentCenter.services.startWarning"),
     ).toBeInTheDocument();
-  });
+    expect(componentManagementApi.lifecycle).not.toHaveBeenCalled();
+    await user.click(
+      screen.getByRole("button", {
+        name: "componentCenter.services.confirmAction",
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        card("temporal").getByRole("button", {
+          name: "Temporal componentCenter.services.stop",
+        }),
+      ).toBeEnabled(),
+    );
+    expect(componentManagementApi.lifecycle).toHaveBeenNthCalledWith(
+      1,
+      "temporal",
+      "start",
+      7,
+      expect.any(AbortSignal),
+    );
+    expect(
+      card("temporal").getByRole("button", {
+        name: "Temporal componentCenter.services.start",
+      }),
+    ).toBeDisabled();
+    expect(
+      card("temporal").getByText("componentCenter.services.modes.docker"),
+    ).toBeInTheDocument();
+    expect(
+      within(
+        card("temporal").getByRole("list", {
+          name: "componentCenter.services.serviceList",
+        }),
+      ).getAllByRole("listitem"),
+    ).toHaveLength(2);
+    await user.click(
+      card("temporal").getByRole("button", {
+        name: "Temporal componentCenter.services.stop",
+      }),
+    );
+    expect(
+      screen.getByText("componentCenter.services.stopWarning"),
+    ).toBeInTheDocument();
+    expect(componentManagementApi.lifecycle).toHaveBeenCalledTimes(1);
+    await user.click(
+      screen.getByRole("button", {
+        name: "componentCenter.services.confirmAction",
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        card("temporal").getByRole("button", {
+          name: "Temporal componentCenter.services.start",
+        }),
+      ).toBeEnabled(),
+    );
+    expect(componentManagementApi.lifecycle).toHaveBeenNthCalledWith(
+      2,
+      "temporal",
+      "stop",
+      8,
+      expect.any(AbortSignal),
+    );
+    expect(componentManagementApi.lifecycle).toHaveBeenCalledTimes(2);
+    expect(componentManagementApi.runtime).toHaveBeenCalledTimes(3);
+  }, 20_000);
 
   it("requires explicit confirmation and sends only one action while pending, then reads actual state", async () => {
     const user = userEvent.setup();

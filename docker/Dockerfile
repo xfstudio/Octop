@@ -33,7 +33,7 @@
 # ---------------------------------------------------------------------------
 # 阶段 1 — 前端构建
 # ---------------------------------------------------------------------------
-FROM node:20-slim AS frontend-builder
+FROM node:24-bookworm-slim AS frontend-builder
 
 ARG NPM_REGISTRY=
 # Node heap ceiling for the vite build. Lower this (e.g. 1024) on low-memory
@@ -77,6 +77,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     OCTOP_LOG_LEVEL=info \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
+    UV_CACHE_DIR=/root/.cache/uv \
     UV_PYTHON_DOWNLOADS=never
 
 ARG PIP_INDEX_URL=
@@ -85,11 +86,15 @@ ARG APT_MIRROR=
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    --mount=type=bind,source=docker/stack/install_debian_packages.py,target=/run/build/install_debian_packages.py,readonly \
     if [ -n "$APT_MIRROR" ]; then \
         printf 'Types: deb\nURIs: https://%s/debian\nSuites: trixie trixie-updates\nComponents: main contrib non-free non-free-firmware\n\nTypes: deb\nURIs: https://%s/debian-security\nSuites: trixie-security\nComponents: main contrib non-free non-free-firmware\n' \
             "$APT_MIRROR" "$APT_MIRROR" > /etc/apt/sources.list.d/debian.sources; \
     fi \
-    && apt-get update && apt-get install -y --no-install-recommends \
+    && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update \
+    && python /run/build/install_debian_packages.py \
         build-essential \
         libffi-dev \
         libgl1 \
@@ -111,7 +116,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         if [ -n "$PIP_TRUSTED_HOST" ]; then export UV_INSECURE_HOST="$PIP_TRUSTED_HOST"; fi; \
     fi \
     && uv sync --frozen --no-install-project --no-dev \
-        --extra browser --extra local-embedding --extra knowledge-ocr
+        --extra browser --extra local-embedding --extra knowledge-ocr --extra longterm-temporal --extra longterm-memory
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
@@ -121,17 +126,21 @@ COPY --from=frontend-builder /build/src/octop/dashboard/ ./src/octop/dashboard/
 
 COPY .env.example ./
 COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    --mount=type=bind,source=docker/stack/install_debian_packages.py,target=/run/build/install_debian_packages.py,readonly \
     if [ -n "$PIP_INDEX_URL" ]; then \
         export UV_INDEX_URL="$PIP_INDEX_URL"; \
         if [ -n "$PIP_TRUSTED_HOST" ]; then export UV_INSECURE_HOST="$PIP_TRUSTED_HOST"; fi; \
     fi \
     && uv sync --frozen --no-dev \
-        --extra browser --extra local-embedding --extra knowledge-ocr \
+        --extra browser --extra local-embedding --extra knowledge-ocr --extra longterm-temporal --extra longterm-memory \
     && .venv/bin/python -c "import cv2, fastembed, huggingface_hub, rapidocr, onnxruntime, pymupdf" \
-    && apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk \
+    && apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update \
+    && python /run/build/install_debian_packages.py fonts-noto-cjk \
     && apt-get purge -y --auto-remove build-essential \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
@@ -144,3 +153,19 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD []
+
+# Unified stack: SDK sources are explicit named contexts, never host state.
+FROM node:24-bookworm-slim AS stack-node
+FROM runtime AS stack
+COPY --from=stack-node /usr/local/bin/node /usr/local/bin/node
+COPY --from=rna_src /packages/sdk/package.json /opt/rna/packages/sdk/
+COPY --from=rna_src /packages/sdk/src /opt/rna/packages/sdk/src
+COPY --from=rna_src /packages/sdk/skills /opt/rna/packages/sdk/skills
+COPY --from=semantica_src /semantica /opt/semantica/semantica
+COPY docker/stack/stack_bootstrap.py /usr/local/bin/stack_bootstrap.py
+ENV OCTOP_RNA_SDK_ROOT=/opt/rna/packages/sdk PYTHONPATH=/opt/semantica
+ENTRYPOINT ["/app/.venv/bin/python", "/usr/local/bin/stack_bootstrap.py"]
+CMD ["octop"]
+
+# Preserve the original default docker build entry point.
+FROM runtime AS default

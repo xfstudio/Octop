@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1
+# Build with the Octop checkout as context and ../semantica as semantica_src.
+FROM node:26-alpine@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3 AS explorer-builder
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+WORKDIR /build/explorer
+COPY --from=semantica_src /explorer/package*.json ./
+RUN npm ci
+COPY --from=semantica_src /explorer/ ./
+RUN npm run build
+
+# This interpreter and the hashed requirements match the upstream build.
+FROM python:3.13-slim@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    SEMANTICA_API_KEY_FILE=/run/stack-secrets/semantica-token \
+    SEMANTICA_PROVENANCE_DB=/data/semantica/explorer.sqlite \
+    SEMANTICA_ALLOW_ANONYMOUS=false
+WORKDIR /opt/semantica
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=30 update \
+    && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=30 install -y --no-install-recommends --only-upgrade \
+       perl-base libpcre2-8-0 libsqlite3-0 gzip openssl libssl3t64 openssl-provider-legacy \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 1000 semantica \
+    && useradd --uid 1000 --gid 1000 --home-dir /data --shell /usr/sbin/nologin semantica \
+    && mkdir -p /data/semantica \
+    && chown 1000:1000 /data
+RUN chown 1000:1000 /data/semantica
+COPY --from=semantica_src /pyproject.toml /README.md /LICENSE /MANIFEST.in ./
+COPY --from=semantica_src /.github/requirements/explorer-extra-py313.txt ./requirements.txt
+COPY --from=semantica_src /.github/requirements/pep517-build.txt ./build-requirements.txt
+COPY --from=semantica_src /semantica/ ./semantica/
+COPY --from=semantica_src /integrations/ ./integrations/
+COPY --from=explorer-builder /build/semantica/static/ ./semantica/static/
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt -r build-requirements.txt \
+    && pip install --no-cache-dir --no-deps --no-build-isolation . \
+    && rm requirements.txt build-requirements.txt
+COPY docker/stack/semantica_entrypoint.py /usr/local/bin/semantica_entrypoint.py
+USER 1000:1000
+EXPOSE 8000
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=10 \
+    CMD python -c "import json,urllib.request; r=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=3)); raise SystemExit(0 if r.get('status')=='ok' else 1)"
+ENTRYPOINT ["python", "/usr/local/bin/semantica_entrypoint.py"]

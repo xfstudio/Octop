@@ -67,8 +67,10 @@ async def wake_task(client: Any, *, tenant_id: str, task_id: str) -> None:
     await handle.signal("wake")
 
 
-async def worker_is_polling(client: Any, *, namespace: str, task_queue: str) -> bool:
-    """Check real Temporal activity pollers belonging to this container/host."""
+async def worker_is_polling(
+    client: Any, *, namespace: str, task_queue: str, local_only: bool = True
+) -> bool:
+    """Check activity pollers, restricting worker health to this host by default."""
     queue_api = _sdk("temporalio.api.taskqueue.v1")
     service_api = _sdk("temporalio.api.workflowservice.v1")
     enum_api = _sdk("temporalio.api.enums.v1")
@@ -79,6 +81,8 @@ async def worker_is_polling(client: Any, *, namespace: str, task_queue: str) -> 
             task_queue_type=enum_api.TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY,
         )
     )
+    if not local_only:
+        return bool(response.pollers)
     hostname = socket.gethostname()
     return any(poller.identity.endswith("@" + hostname) for poller in response.pollers)
 

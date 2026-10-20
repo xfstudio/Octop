@@ -1,0 +1,7 @@
+FROM pgvector/pgvector:0.8.1-pg16@sha256:33198da2828a14c30348d2ccb4750833d5ed9a44c88d840a0e523d7417120337
+COPY --chmod=755 docker/postgres/init-longterm-roles.sh /docker-entrypoint-initdb.d/02-longterm-roles.sh
+COPY docker/postgres/init-vector.sql /docker-entrypoint-initdb.d/01-vector.sql
+COPY --chmod=755 docker/stack/postgres-entrypoint.sh /usr/local/bin/stack-postgres-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/stack-postgres-entrypoint.sh /docker-entrypoint-initdb.d/02-longterm-roles.sh
+ENTRYPOINT ["stack-postgres-entrypoint.sh"]
+CMD ["postgres"]

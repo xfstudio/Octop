@@ -1,1 +1,2 @@
 postgres/init-longterm-roles.sh text eol=lf
+stack/*.sh text eol=lf

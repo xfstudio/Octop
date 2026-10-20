@@ -43,7 +43,7 @@
 
 借助飞书、钉钉、QQ、微信、企业微信或 HTTP/SSE/WebSocket API 与任意 Agent 对话；通过**专家库**一键创建专业角色，通过 **Connector**（OAuth + MCP）接入外部服务，通过 **ACP** 与 IDE / 终端 AI 工具双向协作。
 
-长程工作台提供租户与私有空间、设备离线配置、显式跨设备同步，以及 BeatDesign、Temporal、Semantica、Hindsight、CommerceAgentBench 和 RNA 的集成入口。使用方式、PPT 对照及当前能力边界见 [BM 多租户长程任务说明](docs/bm-platform.md)，开发部署见 [Compose 说明](docker/README.longterm.md)。
+长程工作台提供租户与私有空间、设备离线配置、显式跨设备同步，以及 BeatDesign、Temporal、Semantica、Hindsight、CommerceAgentBench 和 RNA 的集成入口。在仓库根目录执行 `docker compose up -d --build` 可统一构建并启动全部组件；源码准备、初始密码和控制台端口见 [统一容器栈说明](docker/README.stack.md)，PPT 对照及当前能力边界见 [BM 多租户长程任务说明](docs/bm-platform.md)。
 
 ## ✨ 亮点
 

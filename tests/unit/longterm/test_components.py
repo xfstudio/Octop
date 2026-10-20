@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -301,6 +302,47 @@ async def test_saved_temporal_connection_and_queue_reach_the_real_dispatch_path(
     start.assert_awaited_once_with(
         client, tenant_id=tenant, task_id=task["task_id"], task_queue="saved-queue"
     )
+
+
+@pytest.mark.parametrize("identities,healthy", [(["123@worker-container"], True), ([], False)])
+async def test_temporal_component_probe_accepts_remote_worker_but_requires_a_poller(
+    http_plane: HttpControlPlane,
+    monkeypatch: pytest.MonkeyPatch,
+    identities: list[str],
+    healthy: bool,
+) -> None:
+    pytest.importorskip("temporalio")
+    from temporalio.api.taskqueue.v1 import PollerInfo
+    from temporalio.api.workflowservice.v1 import DescribeTaskQueueResponse
+
+    from octop.infra.longterm import temporal_runtime
+
+    monkeypatch.setattr(temporal_runtime.socket, "gethostname", lambda: "api-container")
+    client = SimpleNamespace(
+        workflow_service=SimpleNamespace(
+            describe_namespace=AsyncMock(),
+            describe_task_queue=AsyncMock(
+                return_value=DescribeTaskQueueResponse(
+                    pollers=[PollerInfo(identity=identity) for identity in identities]
+                )
+            ),
+        )
+    )
+    monkeypatch.setattr(temporal_runtime, "connect", AsyncMock(return_value=client))
+
+    response = await http_plane.client.post(
+        BASE + "/temporal/check", headers=http_plane.foreign_auth
+    )
+
+    assert response.status_code == 200, response.text
+    checked = response.json()
+    assert checked["healthy"] is healthy
+    assert {entry["code"]: entry["ok"] for entry in checked["checks"]} == {
+        "temporal_sdk": True,
+        "temporal_service": True,
+        "temporal_namespace": True,
+        "temporal_worker": healthy,
+    }
 
 
 async def test_component_patch_retries_concurrent_public_updates_without_losing_fields(

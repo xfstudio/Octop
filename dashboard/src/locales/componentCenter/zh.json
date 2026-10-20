@@ -213,6 +213,7 @@
     "modes": {
       "embedded": "运行方式：Octop 内嵌集成",
       "compose": "运行方式：受管 Compose 服务",
+      "docker": "运行方式：统一容器栈",
       "process": "运行方式：受管本机进程",
       "external": "运行方式：外部服务"
     },

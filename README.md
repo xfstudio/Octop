@@ -43,7 +43,7 @@
 
 Chat through the Web Dashboard, Feishu, DingTalk, QQ, WeChat, Telegram, Discord, WeCom, or programmatic HTTP/SSE/WebSocket. Extend capabilities with the **expert library**, **Connectors** (OAuth + MCP), and **ACP** integration for IDE workflows.
 
-The long-term workbench adds tenant-private spaces, device-local configuration, explicit synchronization, and integration points for BeatDesign, Temporal, Semantica, Hindsight, CommerceAgentBench, and RNA. See the [BM platform guide](docs/bm-platform.md) for setup, design mapping, and current limits, and the [Compose guide](docker/README.longterm.md) for development deployment.
+The long-term workbench adds tenant-private spaces, device-local configuration, explicit synchronization, and integration points for BeatDesign, Temporal, Semantica, Hindsight, CommerceAgentBench, and RNA. Run the complete stack from this directory with `docker compose up -d --build`; see the [unified stack guide](docker/README.stack.md) for source prerequisites, login credentials and console ports, and the [BM platform guide](docs/bm-platform.md) for design mapping and current limits.
 
 ## ✨ Highlights
 

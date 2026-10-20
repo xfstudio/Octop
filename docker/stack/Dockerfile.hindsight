@@ -1,0 +1,13 @@
+# syntax=docker/dockerfile:1
+# The official standalone image includes the API, real Control Plane and local models.
+FROM ghcr.io/vectorize-io/hindsight:1.0.0@sha256:a88678c038b0e4340822b02a5efc566c56d8176b5bffa731bc433fd37f978e4c
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HINDSIGHT_API_TOKEN_FILE=/run/stack-secrets/hindsight-token \
+    HINDSIGHT_API_LLM_PROVIDER=none
+COPY --chown=1000:1000 docker/stack/hindsight_entrypoint.py /app/octop-hindsight-entrypoint.py
+USER 1000:1000
+EXPOSE 8888 9999
+HEALTHCHECK --interval=20s --timeout=8s --start-period=600s --retries=5 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/health',timeout=3).close(); urllib.request.urlopen('http://127.0.0.1:9999/api/health',timeout=3).close()"
+ENTRYPOINT ["python", "/app/octop-hindsight-entrypoint.py"]

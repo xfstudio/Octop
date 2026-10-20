@@ -2,7 +2,7 @@
 
 组件的集成配置和进程生命周期是两项独立操作。“启用”允许 Octop 使用该适配器；保存连接参数、运行连接检查或设置 `OCTOP_COMPONENT_RUNTIME_FILE` 都不应自动启动服务、提交模型请求或执行评测。停用集成也不等于取消已经提交的任务，停止 worker 也不等于停止 Temporal 中的工作流。
 
-默认使用本机嵌入能力或已独立部署的外部服务。只有运维人员在可信清单中显式登记的 `process` / `compose` 条目，才供系统管理员执行进程启停。普通租户继续通过 Octop 的租户、空间和项目授权访问集成功能。
+默认使用本机嵌入能力或已独立部署的外部服务。只有运维人员在可信清单中显式登记的 `process` / `compose` / `docker` 条目，才供系统管理员执行进程启停。普通租户继续通过 Octop 的租户、空间和项目授权访问集成功能。[统一容器栈](../docker/README.stack.md)会自动生成限定当前项目及组件服务的 `docker` 清单。
 
 ## 默认清单与安装位置
 
@@ -15,7 +15,9 @@ uv run octop run
 
 清单使用 JSON，顶层为 `{"version":1,"components":{...}}`。组件标识为 `octop`、`semantica`、`beatdesign`、`commerceagentbench`、`rna`、`hindsight`、`temporal`。未登记的组件沿用其嵌入或外部接入方式。
 
-`mode` 支持 `embedded`、`external`、`process`、`compose`。前两种不授予进程启停能力：`embedded` 表示随宿主使用的 SDK/本机能力，`external` 表示由其他运维系统管理的独立实例。示例中 CommerceAgentBench 的 `embedded` 只表示 Octop 内的结果读取适配器，评测 harness 仍由独立 CLI 运行。清单首次读取后会缓存，修改文件后需要协调重启 Octop；修改任务连接参数仍需另行协调对应 worker。
+`mode` 支持 `embedded`、`external`、`process`、`compose`、`docker`。前两种不授予进程启停能力：`embedded` 表示随宿主使用的 SDK/本机能力，`external` 表示由其他运维系统管理的独立实例。示例中 CommerceAgentBench 的 `embedded` 只表示 Octop 内的结果读取适配器，评测 harness 仍由独立 CLI 运行。清单首次读取后会缓存，修改文件后需要协调重启 Octop；修改任务连接参数仍需另行协调对应 worker。
+
+`docker` 使用宿主指定的 Unix socket（`OCTOP_DOCKER_SOCKET`，默认 `/var/run/docker.sock`），经固定 Docker Engine API 查询 Compose 项目及服务标签，并逐一 inspect 容器身份。只允许启动和停止已存在的绑定容器，不执行 pull/build/create/remove/down。清单只接受 `mode`、`project_name`、非空 `services` 和可选 `console_url`；缺少任一绑定服务或无法核实标签时状态未知，不能派发操作。容器运行状态与健康状态分别返回，不将运行中的 unhealthy 容器标为健康。浏览器不能选择 socket、容器 ID 或命令。授予 socket 意味着控制面拥有宿主 Docker 高权限，统一栈仅给 Octop 挂载它。
 
 系统管理员可从 `GET /api/longterm/integrations/runtime` 查看 `mode`、`state`、`enabled`、`revision`、允许的动作、服务状态和控制台链接。`enabled` 是集成功能开关；`process` / `compose` 的 `state` 表示观测到的进程或容器状态，两者可以不同。原控制台链接存在也不等于服务已经健康。
 
