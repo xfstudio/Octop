@@ -1,43 +1,22 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  Alert,
-  Button,
-  Card,
-  Checkbox,
-  Form,
-  Input,
-  Modal,
-  Select,
-  Space,
-  Spin,
-  Switch,
-  Tag,
-  Typography,
-} from "antd";
-import {
-  Brain,
-  Dna,
-  Fingerprint,
-  Gauge,
-  RefreshCw,
-  Settings2,
-  Timer,
-  Unplug,
-  Workflow,
-} from "lucide-react";
+import { Alert, Button, Card, Select, Space, Tag, Typography } from "antd";
+import { RefreshCw, Settings2, Unplug } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { APP_LOGO_SRC } from "../../assets/brand";
 import {
   componentManagementApi,
   type ComponentCatalog,
-  type ComponentConfiguration,
   type ComponentConnectionCheck,
   type ManagedComponentId,
   type ProjectComponentId,
 } from "../../api/modules/componentManagement";
 import type { LongtermTask, TaskOperation } from "../../api/modules/longterm";
-import { componentConfigurationPatch } from "./componentConfiguration";
+import ConfigurationDialog from "./ComponentConfigurationDialog";
+import {
+  COMPONENTS,
+  isComponentPermissionError as isPermissionError,
+} from "./componentMetadata";
 import ComponentProjectDialog from "./ComponentProjectDialog";
 import styles from "./ComponentCenter.module.less";
 
@@ -57,16 +36,6 @@ export interface ComponentCenterProps {
   onChanged?: () => void;
 }
 
-const COMPONENTS = [
-  { id: "octop", name: "Octop", icon: null },
-  { id: "semantica", name: "Semantica", icon: Fingerprint },
-  { id: "beatdesign", name: "BeatDesign", icon: Workflow },
-  { id: "commerceagentbench", name: "CommerceAgentBench", icon: Gauge },
-  { id: "rna", name: "RNA", icon: Dna },
-  { id: "hindsight", name: "Hindsight", icon: Brain },
-  { id: "temporal", name: "Temporal", icon: Timer },
-] as const;
-
 const OCTOP_LINKS = [
   ["agents", "/experts"],
   ["models", "/admin/models"],
@@ -84,231 +53,6 @@ const TASK_OPERATIONS: Partial<Record<ManagedComponentId, TaskOperation>> = {
   rna: "evolution",
   hindsight: "memory",
 };
-
-const isPermissionError = (error: unknown) =>
-  error instanceof Error && /Request failed: (401|403)\b/.test(error.message);
-
-function ConfigurationDialog({
-  componentId,
-  name,
-  onClose,
-  onSaved,
-  onDenied,
-}: {
-  componentId: ManagedComponentId;
-  name: string;
-  onClose: () => void;
-  onSaved: () => void;
-  onDenied: () => void;
-}) {
-  const { t } = useTranslation();
-  const [form] = Form.useForm<Record<string, string | boolean>>();
-  const [configuration, setConfiguration] =
-    useState<ComponentConfiguration | null>(null);
-  const [clearSecrets, setClearSecrets] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const active = useRef(true);
-  const controllers = useRef(new Set<AbortController>());
-
-  useEffect(() => {
-    active.current = true;
-    const controller = new AbortController();
-    const requests = controllers.current;
-    requests.add(controller);
-    void componentManagementApi
-      .configuration(componentId, controller.signal)
-      .then((result) => {
-        if (!active.current || controller.signal.aborted) return;
-        setConfiguration(result);
-        // Secrets are never initialized from any server response.
-        form.setFieldsValue(
-          Object.fromEntries(
-            result.fields.map((field) => [
-              field.key,
-              field.secret
-                ? ""
-                : result.values[field.key] ??
-                  (field.type === "boolean" ? false : ""),
-            ]),
-          ),
-        );
-      })
-      .catch((cause: unknown) => {
-        if (!active.current || controller.signal.aborted) return;
-        if (isPermissionError(cause)) onDenied();
-        else setError("loadError");
-      })
-      .finally(() => {
-        requests.delete(controller);
-        if (active.current && !controller.signal.aborted) setLoading(false);
-      });
-    return () => {
-      active.current = false;
-      requests.forEach((request) => request.abort());
-      requests.clear();
-      form.resetFields();
-    };
-  }, [componentId, form, onDenied]);
-
-  const save = async () => {
-    if (!configuration || loading || saving) return;
-    let values: Record<string, string | boolean>;
-    try {
-      values = await form.validateFields();
-    } catch {
-      return;
-    }
-    if (!active.current) return;
-    const controller = new AbortController();
-    controllers.current.add(controller);
-    setSaving(true);
-    setError("");
-    try {
-      await componentManagementApi.save(
-        componentId,
-        componentConfigurationPatch(configuration, values, clearSecrets),
-        controller.signal,
-      );
-      if (active.current && !controller.signal.aborted) onSaved();
-    } catch (cause) {
-      if (!active.current || controller.signal.aborted) return;
-      if (isPermissionError(cause)) onDenied();
-      else setError("saveError");
-    } finally {
-      controllers.current.delete(controller);
-      if (active.current && !controller.signal.aborted) setSaving(false);
-    }
-  };
-
-  return (
-    <Modal
-      open
-      title={t("componentCenter.configurationTitle", { name })}
-      onCancel={onClose}
-      onOk={() => void save()}
-      okText={t("componentCenter.save")}
-      cancelText={t("componentCenter.cancel")}
-      confirmLoading={saving}
-      okButtonProps={{ disabled: loading || !configuration }}
-      width={640}
-    >
-      <Alert
-        type="info"
-        showIcon
-        message={t("componentCenter.configurationHint")}
-        description={
-          <>
-            <div>{t("componentCenter.secretHint")}</div>
-            {componentId === "temporal" && (
-              <div>{t("componentCenter.temporalWorkerHint")}</div>
-            )}
-          </>
-        }
-      />
-      {error && (
-        <Alert type="error" showIcon message={t(`componentCenter.${error}`)} />
-      )}
-      {loading ? (
-        <Spin />
-      ) : (
-        <Form form={form} layout="vertical" className={styles.form}>
-          {configuration?.fields.length === 0 && (
-            <Typography.Paragraph>
-              {t("componentCenter.noFields")}
-            </Typography.Paragraph>
-          )}
-          {configuration?.fields.map((field) => {
-            const label = t(`componentCenter.fields.${field.key}`, {
-              defaultValue: field.key,
-            });
-            const secretSet = Boolean(
-              configuration.secret_configured[field.key],
-            );
-            return (
-              <div key={field.key}>
-                <Form.Item
-                  name={field.key}
-                  label={label}
-                  valuePropName={
-                    field.type === "boolean" && !field.secret
-                      ? "checked"
-                      : "value"
-                  }
-                  rules={
-                    field.required &&
-                    field.type !== "boolean" &&
-                    (!field.secret || !secretSet) &&
-                    !clearSecrets.has(field.key)
-                      ? [
-                          {
-                            required: true,
-                            message: t("componentCenter.fieldRequired"),
-                          },
-                        ]
-                      : []
-                  }
-                  extra={
-                    field.secret ? (
-                      <div className={styles.secretStatus}>
-                        <span>
-                          {t(
-                            `componentCenter.${
-                              secretSet ? "secretSet" : "secretUnset"
-                            }`,
-                          )}
-                        </span>
-                        {secretSet && (
-                          <Checkbox
-                            aria-label={`${label} ${t(
-                              "componentCenter.clearSecret",
-                            )}`}
-                            checked={clearSecrets.has(field.key)}
-                            disabled={saving}
-                            onChange={(event) =>
-                              setClearSecrets((current) => {
-                                const next = new Set(current);
-                                if (event.target.checked) next.add(field.key);
-                                else next.delete(field.key);
-                                return next;
-                              })
-                            }
-                          >
-                            {t("componentCenter.clearSecret")}
-                          </Checkbox>
-                        )}
-                      </div>
-                    ) : undefined
-                  }
-                >
-                  {field.secret ? (
-                    <Input.Password
-                      autoComplete="new-password"
-                      disabled={saving || clearSecrets.has(field.key)}
-                      placeholder={t("componentCenter.secretPlaceholder")}
-                    />
-                  ) : field.type === "boolean" ? (
-                    <Switch disabled={saving} />
-                  ) : field.key.endsWith("json") ? (
-                    <Input.TextArea rows={5} disabled={saving} />
-                  ) : (
-                    <Input disabled={saving} autoComplete="off" />
-                  )}
-                </Form.Item>
-                {clearSecrets.has(field.key) && (
-                  <Typography.Paragraph type="warning">
-                    {t("componentCenter.clearSecretHint")}
-                  </Typography.Paragraph>
-                )}
-              </div>
-            );
-          })}
-        </Form>
-      )}
-    </Modal>
-  );
-}
 
 export default function ComponentCenter({
   connected,
@@ -468,14 +212,21 @@ export default function ComponentCenter({
             {t("componentCenter.subtitle")}
           </Typography.Text>
         </div>
-        <Button
-          icon={<RefreshCw size={15} />}
-          loading={current?.loading}
-          disabled={!connected}
-          onClick={() => setRefresh((value) => value + 1)}
-        >
-          {t("componentCenter.refresh")}
-        </Button>
+        <Space wrap>
+          {connected && isAdmin && canAccessPath("/admin/components") && (
+            <Link to="/admin/components">
+              {t("componentCenter.manageServices")}
+            </Link>
+          )}
+          <Button
+            icon={<RefreshCw size={15} />}
+            loading={current?.loading}
+            disabled={!connected}
+            onClick={() => setRefresh((value) => value + 1)}
+          >
+            {t("componentCenter.refresh")}
+          </Button>
+        </Space>
       </div>
       {!connected && (
         <Alert

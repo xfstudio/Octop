@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "components": {
+    "octop": {
+      "mode": "embedded"
+    },
+    "semantica": {
+      "mode": "embedded"
+    },
+    "beatdesign": {
+      "mode": "external"
+    },
+    "commerceagentbench": {
+      "mode": "embedded"
+    },
+    "rna": {
+      "mode": "embedded"
+    },
+    "hindsight": {
+      "mode": "external"
+    },
+    "temporal": {
+      "mode": "external"
+    }
+  }
+}

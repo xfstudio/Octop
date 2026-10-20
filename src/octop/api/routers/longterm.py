@@ -82,6 +82,39 @@ class ComponentCheckResponse(BaseModel):
     checks: list[ComponentCheckEntry]
 
 
+class ComponentRuntimeServiceResponse(BaseModel):
+    name: str
+    state: str
+    health: str | None
+
+
+class ComponentConsoleResponse(BaseModel):
+    url: str | None
+    kind: Literal["internal", "external"]
+    label: Literal["integration", "native"]
+    available: bool
+
+
+class ComponentRuntimeResponse(BaseModel):
+    component_id: str
+    name: str
+    mode: Literal["embedded", "external", "compose", "process"]
+    state: Literal[
+        "enabled", "disabled", "running", "stopped", "partial", "starting", "stopping", "unknown"
+    ]
+    enabled: bool
+    revision: int
+    can_start: bool
+    can_stop: bool
+    reason: str | None
+    services: list[ComponentRuntimeServiceResponse]
+    console: ComponentConsoleResponse
+
+
+class ComponentRuntimesResponse(BaseModel):
+    components: list[ComponentRuntimeResponse]
+
+
 class TenantResponse(ResourceResponse):
     tenant_id: str
     name: str
@@ -217,6 +250,12 @@ class ComponentConfigBody(StrictBody):
     clear_secrets: list[str] = Field(default_factory=list, max_length=5)
 
 
+class ComponentLifecycleBody(StrictBody):
+    action: Literal["start", "stop"]
+    confirmed: bool = Field(strict=True)
+    expected_revision: int = Field(ge=0, strict=True)
+
+
 class MemberBody(StrictBody):
     user_id: int = Field(gt=0)
     role: Literal["admin", "member", "viewer"] | None = None
@@ -321,6 +360,33 @@ async def component_catalog(
     user: User = Depends(current_user), svc: LongtermService = Depends(service)
 ) -> dict[str, Any]:
     return await asyncio.get_running_loop().run_in_executor(None, svc.components.catalog, user)
+
+
+@router.get(
+    "/integrations/runtime",
+    response_model=ComponentRuntimesResponse,
+    summary="Observe administrator-bound service processes and safe console links",
+)
+async def component_runtimes(
+    user: User = Depends(require_admin()),
+    svc: LongtermService = Depends(service),
+) -> dict[str, Any]:
+    return await svc.component_runtime.inventory(user)
+
+
+@router.post(
+    "/integrations/{component_id}/lifecycle",
+    response_model=ComponentRuntimeResponse,
+    summary="Start or stop an approved component binding with confirmation and revision",
+    description="Global administrator only. Commands and service names come exclusively from the host manifest. Embedded and unmanaged remote integrations change only the local integration switch. Existing jobs are not cancelled by that switch.",
+)
+async def component_lifecycle(
+    component_id: str,
+    body: ComponentLifecycleBody,
+    user: User = Depends(require_admin()),
+    svc: LongtermService = Depends(service),
+) -> dict[str, Any]:
+    return await svc.component_runtime.lifecycle(component_id, user, **body.model_dump())
 
 
 @router.get(

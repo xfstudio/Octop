@@ -17,6 +17,7 @@ from octop.infra.db.repos.longterm import AuthorityRevoked, canonical, digest
 from octop.infra.db.repos.longterm import RevisionConflict as RevisionConflict
 from octop.infra.db.services import SharedServices
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.longterm.component_runtime import ComponentRuntimeManager
 from octop.infra.longterm.components import ComponentManager
 from octop.infra.longterm.execution import compile_workflow
 from octop.infra.longterm.runtime import LongTermRuntime
@@ -68,6 +69,7 @@ class LongtermService:
         self.repo = services.longterm_repo
         self.agent_registry = agent_registry
         self.components = ComponentManager(services)
+        self.component_runtime = ComponentRuntimeManager(self.components)
         self._jobs: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._closed = False
 
@@ -452,6 +454,7 @@ class LongtermService:
             job.cancel()
         await asyncio.gather(*jobs, return_exceptions=True)
         self._jobs.clear()
+        await self.component_runtime.close()
 
     async def _run(self, tenant_id: str, task_id: str) -> None:
         while not self._closed:

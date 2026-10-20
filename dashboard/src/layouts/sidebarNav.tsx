@@ -84,6 +84,7 @@ export const SIDEBAR_NAV_KEYS = [
   "models",
   "admin-storage",
   "admin-plugins",
+  "admin-components",
   "admin-security",
   "admin-advanced",
 ] as const;
@@ -138,6 +139,7 @@ export const SIDEBAR_GROUPED_NAV_KEYS = [
   "models",
   "admin-storage",
   "admin-plugins",
+  "admin-components",
   "admin-security",
   "admin-advanced",
   "agent-config",
@@ -319,6 +321,14 @@ export function buildNavSections(
       path: "/admin/plugins",
       icon: <Puzzle size={iconSize} strokeWidth={iconStroke} />,
       labelKey: "nav.adminPlugins",
+    });
+  }
+  if (navAllowed(user, "admin-components")) {
+    adminItems.push({
+      key: "admin-components",
+      path: "/admin/components",
+      icon: <Package size={iconSize} strokeWidth={iconStroke} />,
+      labelKey: "nav.componentServices",
     });
   }
   if (navAllowed(user, "admin-security")) {

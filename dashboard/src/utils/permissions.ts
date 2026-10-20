@@ -74,6 +74,7 @@ export const NAV_PERMISSIONS = {
   models: PERM.modelsPage,
   "admin-storage": PERM.storage,
   "admin-plugins": PERM.plugins,
+  "admin-components": "admin",
   "admin-security": PERM.securityPage,
   "admin-advanced": PERM.advancedPage,
 } as const satisfies Record<string, PermissionKeys>;

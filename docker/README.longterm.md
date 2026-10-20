@@ -50,6 +50,8 @@ ALTER ROLE octop NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
 
 本镜像和 Compose 默认提供 API、控制库与 Temporal worker。Semantica/Hindsight Python extras、Node ≥22.19、RNA SDK，以及 BeatDesign、Hindsight 等上游服务需要各自准备；启用时用衍生镜像或 Compose override 添加依赖、设备本地凭据、对应环境变量与挂载。事实与演化报告目录也需显式挂载，并只允许可信报告生成器写入。宿主机仅设置这些可选变量不会自动传入当前 Compose 服务。
 
+组件进程启停需另外登记运维可写的 `OCTOP_COMPONENT_RUNTIME_FILE`，见[组件生命周期部署说明](../docs/component-runtime.md)和[安全默认清单](component-runtime.example.json)。该示例不登记可启动命令；文档提供仅管理 `temporal` 服务的可选条目。托管单个组件应固定 Compose 项目、服务和 profile，停止时保留数据卷；不要从组件管理入口执行整个项目的 `down -v`。多实例优先使用独立项目、端口和数据卷，容器版 Octop 不会自动取得宿主 Docker 或 Node 的管理能力。
+
 可单独验证编排文件，无需启动服务：
 
 ```sh

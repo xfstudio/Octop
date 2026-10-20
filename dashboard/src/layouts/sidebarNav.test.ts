@@ -15,6 +15,26 @@ const adminUser = {
 } as OctopUser;
 
 describe("sidebarNav", () => {
+  it("shows component services only in the system admin group", () => {
+    const entry = buildNavSections(adminUser)
+      .find((section) => section.id === "admin")
+      ?.items.find((item) => item.key === "admin-components");
+    expect(entry).toMatchObject({
+      path: "/admin/components",
+      labelKey: "nav.componentServices",
+    });
+    const user = {
+      ...adminUser,
+      role: "user",
+      permissions: ["admin_console"],
+    } as OctopUser;
+    expect(
+      buildNavSections(user)
+        .flatMap((section) => section.items)
+        .some((item) => item.key === "admin-components"),
+    ).toBe(false);
+  });
+
   it("marks catalog keys as grouped", () => {
     for (const key of SIDEBAR_GROUPED_NAV_KEYS) {
       expect(isGroupedNavKey(key)).toBe(true);

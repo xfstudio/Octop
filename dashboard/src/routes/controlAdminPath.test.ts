@@ -9,6 +9,23 @@ import {
 import { isWorkbenchPath, resolveSelectedKey, routeConfigs } from "./index";
 
 describe("pathPermissionKeys", () => {
+  it("restricts component service administration to system admins", () => {
+    expect(pathPermissionKeys("/admin/components")).toBe("admin");
+    expect(
+      canAccessPath(
+        { role: "user", permissions: ["admin_console"] },
+        "/admin/components",
+      ),
+    ).toBe(false);
+    expect(
+      canAccessPath({ role: "admin", permissions: [] }, "/admin/components"),
+    ).toBe(true);
+    expect(resolveSelectedKey("/admin/components")).toBe("admin-components");
+    expect(
+      routeConfigs.some((route) => route.path === "/admin/components"),
+    ).toBe(true);
+  });
+
   it("matches workbench and legacy aliases", () => {
     expect(isWorkbenchPath("/workbench")).toBe(true);
     expect(pathPermissionKeys("/workbench")).toBeNull();

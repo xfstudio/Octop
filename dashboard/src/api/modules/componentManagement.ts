@@ -57,6 +57,72 @@ export interface ComponentConnectionCheck {
   checks: { code: string; ok: boolean }[];
 }
 
+export type ComponentLifecycleAction = "start" | "stop";
+
+export interface ComponentRuntime {
+  component_id: ManagedComponentId;
+  name: string;
+  mode: "embedded" | "compose" | "process" | "external";
+  state:
+    | "enabled"
+    | "disabled"
+    | "running"
+    | "stopped"
+    | "partial"
+    | "starting"
+    | "stopping"
+    | "unknown";
+  enabled: boolean;
+  revision: number;
+  can_start: boolean;
+  can_stop: boolean;
+  reason: string | null;
+  services: { name: string; state: string; health: string | null }[];
+  console: {
+    url: string | null;
+    kind: "internal" | "external";
+    label: "integration" | "native";
+    available: boolean;
+  };
+}
+
+export class ComponentLifecycleError extends Error {
+  readonly status: number | undefined;
+  readonly reason: string;
+
+  constructor(status: number | undefined, reason: string) {
+    super("Component lifecycle request failed");
+    this.name = "ComponentLifecycleError";
+    this.status = status;
+    this.reason = reason;
+  }
+}
+
+function lifecycleError(cause: unknown): ComponentLifecycleError {
+  const message = cause instanceof Error ? cause.message : "";
+  const statusText = /^Request failed: (\d+)\b/.exec(message)?.[1];
+  let reason = "lifecycle_failed";
+  try {
+    const body = JSON.parse(message.slice(message.indexOf(" - ") + 3)) as {
+      reason?: string;
+      detail?: { reason?: string };
+      error?: { reason?: string; details?: { reason?: string } };
+    };
+    const code =
+      body.detail?.reason ??
+      body.error?.details?.reason ??
+      body.error?.reason ??
+      body.reason;
+    if (typeof code === "string" && /^[a-z0-9_]+$/.test(code)) reason = code;
+  } catch {
+    // Keep a safe fallback; raw server and subprocess output stays hidden.
+  }
+  return new ComponentLifecycleError(
+    statusText ? Number(statusText) : undefined,
+    reason,
+  );
+}
+
 export type ProjectComponentId = "beatdesign" | "rna";
 export type ProjectReadOperation =
   | "project"
@@ -113,6 +179,28 @@ export const componentManagementApi = {
       method: "POST",
       signal,
     }),
+  runtime: (signal?: AbortSignal) =>
+    request<{ components: ComponentRuntime[] }>(`${base}/runtime`, { signal }),
+  lifecycle: async (
+    id: ManagedComponentId,
+    action: ComponentLifecycleAction,
+    expectedRevision: number,
+    signal?: AbortSignal,
+  ): Promise<ComponentRuntime> => {
+    try {
+      return await request<ComponentRuntime>(`${componentPath(id)}/lifecycle`, {
+        method: "POST",
+        body: JSON.stringify({
+          action,
+          confirmed: true,
+          expected_revision: expectedRevision,
+        }),
+        signal,
+      });
+    } catch (cause) {
+      throw lifecycleError(cause);
+    }
+  },
   project: (tenantId: string, id: ProjectComponentId, signal?: AbortSignal) =>
     request<ComponentProjectBinding>(projectPath(tenantId, id), { signal }),
   bindProject: (

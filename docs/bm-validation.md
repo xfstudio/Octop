@@ -96,6 +96,20 @@ uv run --no-sync pytest tests/unit/longterm/test_runtime_temporal_live.py -m liv
 - 最终 wheel 为 `dist/local-smoke/workbench-wheel/octop-1.0.2-py3-none-any.whl`，14018258 字节，SHA256 `6e183a1352744925cb35e64446f0830a8f8611d24cc9209e32225fbba68747b4`。安装至 `dist/local-smoke/workbench-packages` 并使用原独立测试数据目录在 8099 运行；重新执行 29 项 HTTP 检查通过。原 8088 服务未停止。
 - 连接检查只做只读探测，不触发付费生成。Temporal 修改连接、命名空间或队列后需单独重启 worker；项目读取不会执行媒体生成或基因激活。候选状态迁移仍不代表部署生产行为。
 
+## 管理后台组件启停与控制台验收（2026-10-20）
+
+新增系统管理员入口 `/admin/components`，覆盖七组件的集成配置、运行状态、确认启停及控制台链接；工作台组件中心可直接进入后台，后台也可返回当前组件中心。租户 owner/admin 不具有宿主服务管理权限。
+
+- 最终代码完整 `make all` 通过：**5035 passed、226 skipped、18 warnings**，耗时 603.04 秒；包含全仓格式化、Ruff、616 个源文件的 mypy 和完整非 live 后端测试。warning 为既有依赖弃用与 Windows 浏览器安装测试子进程解码提示。
+- 前端五个专项文件 **45 项通过**，包含启停确认、单次 POST、409 不重试、失败后重新读取实际状态、权限/账号切换、离线锁定及控制台链接；TypeScript、定向 ESLint、Prettier、最终生产构建通过。运行信息在卡片中分行显示，普通模式说明使用次要文字。
+- 后端生命周期专项 **23 passed、1 skipped**；与原组件配置和 HTTP 合同联合验证 **50 passed、1 skipped**。覆盖真实私有 Python 进程、跨管理器 CAS 竞争、审计失败不派发、执行前撤权、确认与版本冲突、固定 Compose 参数、输出脱敏、父进程提前退出及操作取消后的 uncertain 审计。当前 Windows 跳过 POSIX 进程组回归，该平台仍需实际执行该项。
+- 编译后的 wheel 在本机 8099 完成 **17 项生命周期 HTTP 检查**：原生进程真启动/停止、HTTP 端口开放/关闭、过期版本 409、未确认/任意命令字段拒绝、Compose 健康与停止、内嵌集成停用/恢复及控制面持续可用。进程目标为无模型调用的合成 HTTP 服务，Compose 目标为专用 Redis 测试服务；它们只验证运行器，不能算作 Semantica/Temporal 业务服务验收。
+- 最终包重新执行原有工作台与权限 HTTP 冒烟，扩展为 **32 项通过**，包括普通租户读取宿主进程/控制台和启停操作返回 403，以及最终服务不存在测试托管绑定。测试进程、容器、匿名测试卷和测试网络均已清理；最终后台只展示真实嵌入/外部接入状态。
+- 浏览器通过“确认启动→打开原生控制台新标签→确认停止”的真实流程，控制台链接包含 `noopener noreferrer`；验证后台和工作台双向导航。390px 视口和文档宽度均为 390px，七卡片运行信息无横向溢出；恢复 1440px 视口后无页面脚本错误。
+- 最终 PWA 预缓存 **255 项，约 15.96 MiB**，包含新管理页面及全部 JavaScript 分块。全新浏览器环境只在线访问登录页，等待 SW 激活、清空 HTTP 缓存后断网，首次进入未访问过的离线工作台成功，无页面脚本错误。最终 wheel 位于 `dist/local-smoke/component-runtime-final-wheel/octop-1.0.2-py3-none-any.whl`，14034335 字节，SHA256 `bd2d2054d92caf5864f494d481751cfdd88861a337a688fe1923fa6e628badb7`；独立安装目录为 `dist/local-smoke/component-runtime-final-packages`。8099 继续使用原专用测试数据，8088 原服务保持可用。
+
+真正的进程启停只对宿主可信清单绑定的 `process`/`compose` 生效；内嵌 SDK、批处理结果适配器及未托管远端只提供集成开关，停用不撤销已经派发的操作。上游控制台保留自己的认证，未配置地址时进入 Octop 集成控制台。部署方法与已知边界见 [组件生命周期说明](component-runtime.md)。
+
 ## 仍需独立验收
 
 Semantica 真实本地源码的 SQLite 写入与回读已验证；RNA 真实 SDK 通过本机合成 SSE 服务验证。Hindsight/BeatDesign 远端服务、真实模型、CommerceAgentBench 付费完整运行、生产 Temporal 集群及整套 Docker 镜像端到端尚未验证。

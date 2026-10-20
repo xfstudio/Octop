@@ -64,6 +64,7 @@ FIELDS: dict[str, dict[str, tuple[str, Any, str]]] = {
 }
 for _fields in FIELDS.values():
     _fields["enabled"] = ("boolean", True, "")
+    _fields["console_url"] = ("string", "", "")
 
 
 def _invalid(reason: str) -> OctopError:
@@ -191,7 +192,7 @@ class ComponentManager:
                 if path.is_absolute() or ".." in path.parts or "\\" in value or ":" in value:
                     raise _invalid("relative_component_directory_required")
                 self.directory(component_id, key, values={**self.resolve(component_id), **values})
-            elif key in {"base_url", "endpoint"} and value:
+            elif key in {"base_url", "endpoint", "console_url"} and value:
                 parsed = urlsplit(value)
                 if (
                     parsed.scheme not in {"http", "https"}
@@ -200,6 +201,8 @@ class ComponentManager:
                     or parsed.password
                     or parsed.query
                     or parsed.fragment
+                    or "\\" in value
+                    or any(ord(char) <= 32 for char in value)
                 ):
                     raise _invalid("component_http_url_required")
             elif key == "address" and value and not re.fullmatch(r"[A-Za-z0-9.\-\[\]:]+", value):

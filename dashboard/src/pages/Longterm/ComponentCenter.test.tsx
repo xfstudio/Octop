@@ -181,6 +181,28 @@ describe("component management center", () => {
     });
   });
 
+  it("links system admins to component services while keeping tenant admins separate", async () => {
+    const view = render(viewForAdmin());
+    expect(
+      await screen.findByRole("link", {
+        name: "componentCenter.manageServices",
+      }),
+    ).toHaveAttribute("href", "/admin/components");
+    await act(async () => view.rerender(viewForAdmin(false)));
+    expect(
+      screen.queryByRole("link", { name: "componentCenter.manageServices" }),
+    ).not.toBeInTheDocument();
+    function viewForAdmin(isAdmin = true) {
+      return (
+        <MemoryRouter>
+          <ConfigProvider theme={{ token: { motion: false } }}>
+            <ComponentCenter {...props({ isAdmin })} />
+          </ConfigProvider>
+        </MemoryRouter>
+      );
+    }
+  });
+
   it("keeps all component descriptions and device editing available offline without server requests", async () => {
     const user = userEvent.setup();
     const parameters = props({ connected: false });

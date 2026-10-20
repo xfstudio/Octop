@@ -282,6 +282,7 @@
     "adminAdvanced": "Application Settings",
     "security": "Security",
     "adminPlugins": "Plugins",
+    "componentServices": "Component services",
     "skillPackages": "Skill Packages",
     "knowledgeBases": "Knowledge Bases",
     "remoteAndroid": "Remote Phone",
