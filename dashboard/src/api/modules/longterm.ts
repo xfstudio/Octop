@@ -64,6 +64,7 @@ export interface LongtermTask {
   mode?: string;
   checkpoint?: Record<string, unknown>;
   result?: unknown;
+  artifacts?: Record<string, unknown[]>;
   plan_digest?: string;
   created_at?: string;
   updated_at?: string;

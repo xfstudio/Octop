@@ -4,6 +4,16 @@
   gap: 16px;
   min-width: 0;
 }
+.embedded {
+  min-height: 0;
+  padding: 16px 24px 24px;
+  overflow: auto;
+}
+.embeddedActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -65,6 +75,9 @@
   margin-bottom: 24px;
 }
 @media (max-width: 680px) {
+  .embedded {
+    padding: 12px;
+  }
   .grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 0;

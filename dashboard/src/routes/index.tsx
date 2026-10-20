@@ -13,7 +13,6 @@ const PersonalizationPage = lazy(
 );
 const ACPPage = lazy(() => import("../pages/Agent/ACP"));
 const TokenUsagePage = lazy(() => import("../pages/Control/TokenUsage"));
-const LongtermPage = lazy(() => import("../pages/Longterm"));
 
 // Lazy-loaded pages — Control
 const RemoteDesktopPage = lazy(() => import("../pages/Control/RemoteDesktop"));
@@ -72,6 +71,7 @@ export const pathToKey: Record<string, string> = {
   "/acp": "acp",
   "/channels": "channels",
   "/workbench": "workbench",
+  "/workbench/platform": "longterm",
   "/workbench/terminal": "workbench",
   "/workbench/browser": "workbench",
   "/terminal": "workbench",
@@ -101,6 +101,7 @@ export const pathToKey: Record<string, string> = {
  */
 export const FULLSCREEN_PATHS = new Set([
   "/workbench",
+  "/workbench/platform",
   "/workbench/terminal",
   "/workbench/browser",
   "/chat",
@@ -154,7 +155,10 @@ export const routeConfigs: RouteConfig[] = [
   // Common
   { path: "/experts", element: <ExpertsPage /> },
   { path: "/tasks", element: <CronJobsPage /> },
-  { path: "/longterm", element: <LongtermPage /> },
+  {
+    path: "/longterm",
+    element: <RedirectPreserveSearch to="/workbench/platform" />,
+  },
   { path: "/connectors", element: <ConnectorsPage /> },
   { path: "/skill-packages", element: <SkillPackagesPage /> },
   { path: "/knowledge-bases", element: <KnowledgeBasesPage /> },
@@ -178,6 +182,7 @@ export const routeConfigs: RouteConfig[] = [
   },
   // Workbench (terminal + browser) is keep-alive mounted in MainLayout.
   { path: "/workbench", element: null },
+  { path: "/workbench/platform", element: null },
   { path: "/workbench/terminal", element: null },
   { path: "/workbench/browser", element: null },
   {

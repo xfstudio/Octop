@@ -90,6 +90,36 @@ describe("offline workbench and revision-safe sync", () => {
     expect(mocks.timezone).toHaveBeenCalledWith(false);
   });
 
+  it("hides portal dialogs while the kept-alive workbench is not visible and preserves the draft", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <MemoryRouter>
+        <LongtermPage standalone />
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole("button", { name: "longterm.newLocal" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "longterm.name" }),
+      "Pending draft",
+    );
+    rerender(
+      <MemoryRouter>
+        <LongtermPage standalone isVisible={false} />
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    rerender(
+      <MemoryRouter>
+        <LongtermPage standalone />
+      </MemoryRouter>,
+    );
+    expect(
+      await screen.findByRole("textbox", { name: "longterm.name" }),
+    ).toHaveValue("Pending draft");
+  });
+
   it("preserves the device draft after a conflict and downloads a separate copy", async () => {
     mocks.user = { id: 1 };
     const saved = createLocalWorkspaceState("Device version");

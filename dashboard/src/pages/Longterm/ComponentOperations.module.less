@@ -1,0 +1,60 @@
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.modal {
+  max-width: calc(100vw - 24px);
+
+  :global(.ant-modal-body),
+  :global(.ant-card-body) {
+    min-width: 0;
+  }
+
+  :global(.ant-form-item) {
+    margin-bottom: 18px;
+  }
+}
+
+.code,
+.json {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.json {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.digest {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.candidate {
+  margin-top: 12px;
+
+  :global(.ant-card-head-title) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+.memoryText {
+  min-width: 120px;
+  max-width: 420px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

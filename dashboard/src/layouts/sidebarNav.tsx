@@ -187,7 +187,7 @@ export function buildNavSections(
   }
   topItems.push({
     key: "longterm",
-    path: "/longterm",
+    path: "/workbench/platform",
     icon: <GitBranch size={iconSize} strokeWidth={iconStroke} />,
     labelKey: "nav.longterm",
   });

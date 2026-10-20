@@ -28,6 +28,20 @@ class SettingsRepo:
         with self._db.transaction() as conn:
             conn.execute("DELETE FROM settings WHERE key = ?", (key,))
 
+    def compare_and_set(self, key: str, expected: str | None, value: str) -> bool:
+        """Atomically update a versioned value without overwriting another writer."""
+        with self._db.transaction() as conn:
+            if expected is None:
+                cursor = conn.execute(
+                    "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO NOTHING",
+                    (key, value),
+                )
+            else:
+                cursor = conn.execute(
+                    "UPDATE settings SET value=? WHERE key=? AND value=?", (value, key, expected)
+                )
+            return bool(cursor.rowcount == 1)
+
     def get_active_model(self) -> tuple[str, str]:
         """Return (provider_name, model_id); empty strings if not set."""
         raw = self.get(self._KEY_ACTIVE_MODEL) or ""

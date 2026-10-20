@@ -10,6 +10,7 @@ const ROUTE_PREFETCHERS: Record<string, () => Promise<unknown>> = {
   "/token-usage": () => import("../pages/Control/TokenUsage"),
   "/channels": () => import("../pages/Agent/Personalization"),
   "/workbench": () => import("../pages/Control/Workbench"),
+  "/workbench/platform": () => import("../pages/Longterm"),
   "/workbench/browser": () => import("../pages/Control/Workbench"),
   "/workbench/terminal": () => import("../pages/Control/Workbench"),
   "/remote-desktop": () => import("../pages/Control/RemoteDesktop"),

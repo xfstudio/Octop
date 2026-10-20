@@ -311,6 +311,7 @@ class RnaSdkAdapter:
         evidence: Sequence[Mapping[str, Any]],
         model: Mapping[str, Any],
         api_key_env: str,
+        api_key: str | None = None,
         timeout_seconds: float = 120,
         authorization_check: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
@@ -318,7 +319,7 @@ class RnaSdkAdapter:
             raise ValueError("RNA timeout must be between 0 and 600 seconds")
         if not api_key_env or not api_key_env.replace("_", "a").isalnum():
             raise ValueError("An explicit credential environment variable name is required")
-        api_key = os.environ.get(api_key_env)
+        api_key = api_key if api_key is not None else os.environ.get(api_key_env)
         if not api_key:
             return {
                 "source": "rna_dev",

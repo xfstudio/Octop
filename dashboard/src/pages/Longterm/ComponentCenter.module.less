@@ -1,0 +1,145 @@
+.center {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+
+  h4 {
+    margin: 0 0 6px;
+  }
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.card {
+  min-width: 0;
+
+  :global(.ant-card-body) {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    height: 100%;
+  }
+}
+
+.cardHeading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+
+  > span:last-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--fn-bg-layout);
+  color: var(--fn-primary-color, #e67428);
+
+  img {
+    display: block;
+    width: 30px;
+    height: 30px;
+    object-fit: contain;
+  }
+}
+
+.description {
+  margin: 0;
+  line-height: 1.7;
+}
+
+.detail {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  color: var(--fn-text-secondary);
+}
+
+.actions {
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.taskSelect {
+  width: min(100%, 560px);
+}
+
+.taskScope {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--fn-border-color);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.form {
+  margin-top: 18px;
+
+  :global(.ant-form-item-extra) {
+    overflow-wrap: anywhere;
+  }
+}
+
+.secretStatus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.readToolbar {
+  margin-top: 8px;
+}
+
+.operationSelect {
+  min-width: 240px;
+  max-width: 100%;
+}
+
+.result {
+  margin-top: 10px;
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--fn-bg-layout);
+  font-size: 12px;
+}
+
+@media (max-width: 800px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

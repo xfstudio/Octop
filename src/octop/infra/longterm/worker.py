@@ -76,13 +76,15 @@ async def run() -> None:
                 "result": task.get("result"),
             }
 
+        service.components.require_enabled("temporal")
+        settings = service.components.resolve("temporal")
         await run_worker(
             step,
-            address=os.environ.get("OCTOP_TEMPORAL_ADDRESS", "localhost:7233"),
-            namespace=os.environ.get("OCTOP_TEMPORAL_NAMESPACE", "default"),
-            task_queue=os.environ.get("OCTOP_TEMPORAL_TASK_QUEUE", "octop-longterm"),
-            tls=os.environ.get("OCTOP_TEMPORAL_TLS", "").lower() in {"1", "true", "yes"},
-            api_key=os.environ.get("OCTOP_TEMPORAL_API_KEY") or None,
+            address=settings["address"] or "localhost:7233",
+            namespace=settings["namespace"],
+            task_queue=settings["task_queue"],
+            tls=settings["tls"],
+            api_key=settings["api_key"] or None,
         )
     finally:
         await service.close()
@@ -90,19 +92,24 @@ async def run() -> None:
 
 
 async def healthcheck() -> None:
-    namespace = os.environ.get("OCTOP_TEMPORAL_NAMESPACE", "default")
-    client = await connect(
-        address=os.environ.get("OCTOP_TEMPORAL_ADDRESS", "localhost:7233"),
-        namespace=namespace,
-        tls=os.environ.get("OCTOP_TEMPORAL_TLS", "").lower() in {"1", "true", "yes"},
-        api_key=os.environ.get("OCTOP_TEMPORAL_API_KEY") or None,
-    )
-    if not await worker_is_polling(
-        client,
-        namespace=namespace,
-        task_queue=os.environ.get("OCTOP_TEMPORAL_TASK_QUEUE", "octop-longterm"),
-    ):
-        raise RuntimeError("no active Temporal poller for this worker host")
+    loop = asyncio.get_running_loop()
+    database, service = await loop.run_in_executor(None, _open_service)
+    try:
+        service.components.require_enabled("temporal")
+        settings = service.components.resolve("temporal")
+        client = await connect(
+            address=settings["address"] or "localhost:7233",
+            namespace=settings["namespace"],
+            tls=settings["tls"],
+            api_key=settings["api_key"] or None,
+        )
+        if not await worker_is_polling(
+            client, namespace=settings["namespace"], task_queue=settings["task_queue"]
+        ):
+            raise RuntimeError("no active Temporal poller for this worker host")
+    finally:
+        await service.close()
+        await loop.run_in_executor(None, database.close)
 
 
 def main() -> None:

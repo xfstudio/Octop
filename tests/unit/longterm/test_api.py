@@ -18,6 +18,7 @@ from octop.api.deps import sign_token
 from octop.api.middleware import jwt_auth
 from octop.api.openapi_meta import configure_openapi
 from octop.api.routers.longterm import router
+from octop.api.routers.longterm_projects import router as projects_router
 from octop.config import OctopConfig
 from octop.infra.db.migrate import run_migrations
 from octop.infra.db.pool import SqlitePool
@@ -69,6 +70,7 @@ async def http_plane(
     app.state.octop_server = server
     _install_exception_handlers(app)
     app.include_router(router, prefix=_BASE, tags=["longterm"])
+    app.include_router(projects_router, prefix=_BASE, tags=["longterm"])
     jwt_auth.install(app, server)
     configure_openapi(app)
     owner_auth = {

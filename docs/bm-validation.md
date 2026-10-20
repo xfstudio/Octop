@@ -83,6 +83,19 @@ uv run --no-sync pytest tests/unit/longterm/test_runtime_temporal_live.py -m liv
 
 本机测试管理员为 `musae-local`，随机口令仅保存在忽略的 `dist/local-smoke/access.json`；不包含真实模型或云服务凭证。测试过程未调用付费模型。服务使用受管理终端前台运行，重启命令见本机 `dist/local-smoke/run-server.ps1`。
 
+## 统一组件工作台验收（2026-10-20）
+
+入口为 `/workbench/platform`，原 `/longterm` 保留查询参数和片段并跳转至新入口。组件管理中心覆盖 Octop、Semantica、BeatDesign、CommerceAgentBench、RNA、Hindsight 和 Temporal；各操作复用当前租户、私有空间和任务，不默认选择其他空间。
+
+- 前端 8 个专项测试文件共 **63 项通过**，包含组件配置、操作表单、项目绑定、候选历史、权限与路由；TypeScript、定向 ESLint 和生产构建通过。
+- 仓库完整 `make all` 通过：**5012 passed、225 skipped、18 warnings**，耗时 1471.68 秒；包含全仓格式化、Ruff、615 个源文件的 mypy 和完整非 live 后端测试。仍有上游弃用提示和既有 Windows 浏览器安装测试子进程解码 warning。
+- 提交钩子首次运行的受影响测试为 1239 passed、1 skipped、1 failed：既有备份删除并发测试在覆盖跟踪下超过 5 秒启动等待。单独普通运行通过、开启 testmon 可复现。测试改用线程安全的异步事件通知与有界等待，保留 busy、409、204 及释放状态全部断言；testmon 单项复验通过（50.09 秒）。此处只修复测试同步，未改备份业务实现。
+- 本机新 wheel 的真实 HTTP 检查 **29 项通过**，覆盖登录要求、七组件目录、脱敏配置、真实数据库探测、凭证写入不回显/空白保留/显式清除、本机任务与有效证据链、手工候选与历史、项目绑定 CAS、项目覆盖与写工具拒绝、普通成员管理拒绝及私有空间隔离。
+- 浏览器确认旧路由兼容跳转、七组件卡片、配置保存与凭证空白、数据库连接检查、当前任务候选表单和历史可用。隐藏工作台时操作弹窗消失；390px 视口的页面与文档宽度均为 390px。
+- 发现并修复统一入口引起的离线依赖拆分：预缓存覆盖全部构建 JavaScript（181 个模块，含 6 个语言包），共 251 项、约 15.94 MiB。全新浏览器环境只访问登录页，等待 SW 激活后清空 HTTP 缓存并断网，首次打开未访问过的离线入口成功；修改配置名称并刷新仍保留，没有页面脚本异常。
+- 最终 wheel 为 `dist/local-smoke/workbench-wheel/octop-1.0.2-py3-none-any.whl`，14018258 字节，SHA256 `6e183a1352744925cb35e64446f0830a8f8611d24cc9209e32225fbba68747b4`。安装至 `dist/local-smoke/workbench-packages` 并使用原独立测试数据目录在 8099 运行；重新执行 29 项 HTTP 检查通过。原 8088 服务未停止。
+- 连接检查只做只读探测，不触发付费生成。Temporal 修改连接、命名空间或队列后需单独重启 worker；项目读取不会执行媒体生成或基因激活。候选状态迁移仍不代表部署生产行为。
+
 ## 仍需独立验收
 
 Semantica 真实本地源码的 SQLite 写入与回读已验证；RNA 真实 SDK 通过本机合成 SSE 服务验证。Hindsight/BeatDesign 远端服务、真实模型、CommerceAgentBench 付费完整运行、生产 Temporal 集群及整套 Docker 镜像端到端尚未验证。

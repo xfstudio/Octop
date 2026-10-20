@@ -263,7 +263,10 @@ export function pathPermissionKeys(pathname: string): PermissionKeys | null {
   if (pathname === "/workbench/browser" || pathname === "/remote-browser") {
     return PERM.browser;
   }
-  if (pathname === "/workbench" || pathname.startsWith("/workbench/")) {
+  if (pathname === "/workbench" || pathname === "/workbench/platform") {
+    return null;
+  }
+  if (pathname.startsWith("/workbench/")) {
     return PERM.workbench;
   }
   // ACP: no module key this round — admin role only.

@@ -308,7 +308,7 @@
     "saveFailed": "没能保存导航布局",
     "dragToReorder": "拖动排序",
     "chatHistory": "会话列表",
-    "longterm": "长程智能体"
+    "longterm": "多智能体工作台"
   },
   "skillPackages": {
     "title": "技能包",
@@ -4873,10 +4873,11 @@
   },
   "workbench": {
     "title": "工作台",
-    "description": "查看并接管专家的终端与浏览器，实时跟进执行过程",
+    "description": "统一管理组件、编排多智能体工作流、执行长程任务并跟踪结果",
     "tabs": {
       "terminal": "终端",
-      "browser": "浏览器"
+      "browser": "浏览器",
+      "platform": "组件与任务"
     }
   },
   "remoteDesktopHub": {
@@ -7038,7 +7039,7 @@
     "workflowTab": "工作流编排",
     "syncTab": "租户与同步",
     "tasksTab": "长程任务",
-    "integrationsTab": "集成状态",
+    "integrationsTab": "组件管理与功能",
     "workspaceName": "本机配置名称",
     "executionMode": "执行引擎",
     "localExecutionHint": "本机引擎通过 Octop 执行；Temporal 模式需要已连接的 Temporal 服务和工作进程。",

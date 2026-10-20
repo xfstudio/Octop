@@ -12,9 +12,27 @@ export type { UiLocale } from "./utils/localePrefs";
 
 async function loadLocaleBundle(locale: UiLocale) {
   if (locale === "zh") {
-    return (await import("./locales/zh.json")).default;
+    const [base, center, operations] = await Promise.all([
+      import("./locales/zh.json"),
+      import("./locales/componentCenter/zh.json"),
+      import("./locales/componentOperations/zh.json"),
+    ]);
+    return {
+      ...base.default,
+      componentCenter: center.default,
+      componentOperations: operations.default,
+    };
   }
-  return (await import("./locales/en.json")).default;
+  const [base, center, operations] = await Promise.all([
+    import("./locales/en.json"),
+    import("./locales/componentCenter/en.json"),
+    import("./locales/componentOperations/en.json"),
+  ]);
+  return {
+    ...base.default,
+    componentCenter: center.default,
+    componentOperations: operations.default,
+  };
 }
 
 export async function ensureLocaleBundle(locale: UiLocale): Promise<void> {

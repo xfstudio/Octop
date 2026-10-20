@@ -275,6 +275,20 @@ class HindsightAdapter:
             count += 1
         return count
 
+    async def delete(self, *, tenant_id: str, document_id: str, consent: bool) -> dict[str, Any]:
+        if consent is not True or not document_id.startswith("octop-"):
+            raise ValueError("explicit consent and a qualified document are required")
+        if self._authorization_check is not None:
+            self._authorization_check()
+        await self._get_client().documents.delete_document(self.bank_id(tenant_id), document_id)
+        return {
+            "source": "hindsight",
+            "bank_id": self.bank_id(tenant_id),
+            "document_id": document_id,
+            "deleted": True,
+            "ttl_enforcement": "adapter_read_filter",
+        }
+
     async def close(self) -> None:
         if self._client is not None:
             await self._client.aclose()
@@ -340,11 +354,17 @@ class BeatDesignAdapter:
     )
 
     def __init__(
-        self, endpoint: str, tenant_projects: dict[str, str], *, token: str | None = None
+        self,
+        endpoint: str,
+        tenant_projects: dict[str, str],
+        *,
+        token: str | None = None,
+        authorization_check: Callable[[], None] | None = None,
     ) -> None:
         self.endpoint = endpoint
         self.tenant_projects = dict(tenant_projects)
         self.token = token
+        self._authorization_check = authorization_check
 
     async def call_tool(
         self, tenant_id: str, tool: str, arguments: dict[str, Any]
@@ -365,11 +385,15 @@ class BeatDesignAdapter:
         except ImportError as exc:
             raise IntegrationUnavailable("the MCP Python SDK is required") from exc
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else None
+        if self._authorization_check is not None:
+            await asyncio.get_running_loop().run_in_executor(None, self._authorization_check)
         async with (
             transport(self.endpoint, headers=headers) as (read, write, _),
             session_type(read, write) as session,
         ):
             await session.initialize()
+            if self._authorization_check is not None:
+                await asyncio.get_running_loop().run_in_executor(None, self._authorization_check)
             result = _object(await session.call_tool(tool, arguments=args))
         if result.get("isError"):
             raise IntegrationUnavailable("BeatDesign rejected the MCP command")
@@ -402,11 +426,13 @@ class RnaAdapter:
         *,
         token: str | None = None,
         http_client: Any = None,
+        authorization_check: Callable[[], None] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.tenant_projects = dict(tenant_projects)
         self.token = token
         self._http_client = http_client
+        self._authorization_check = authorization_check
 
     def _project_path(self, tenant_id: str) -> str:
         project = self.tenant_projects.get(tenant_id)
@@ -418,6 +444,8 @@ class RnaAdapter:
         self, method: str, path: str, payload: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+        if self._authorization_check is not None:
+            await asyncio.get_running_loop().run_in_executor(None, self._authorization_check)
         if self._http_client is not None:
             response = await self._http_client.request(
                 method, self.base_url + path, json=payload, headers=headers
@@ -428,6 +456,10 @@ class RnaAdapter:
             except ImportError as exc:
                 raise IntegrationUnavailable("httpx is required for the RNA adapter") from exc
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
+                if self._authorization_check is not None:
+                    await asyncio.get_running_loop().run_in_executor(
+                        None, self._authorization_check
+                    )
                 response = await client.request(
                     method, self.base_url + path, json=payload, headers=headers
                 )

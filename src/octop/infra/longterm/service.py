@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import importlib.util
 import json
 import math
 import os
@@ -18,6 +17,7 @@ from octop.infra.db.repos.longterm import AuthorityRevoked, canonical, digest
 from octop.infra.db.repos.longterm import RevisionConflict as RevisionConflict
 from octop.infra.db.services import SharedServices
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.longterm.components import ComponentManager
 from octop.infra.longterm.execution import compile_workflow
 from octop.infra.longterm.runtime import LongTermRuntime
 from octop.infra.users.identity import User
@@ -67,6 +67,7 @@ class LongtermService:
         self.services = services
         self.repo = services.longterm_repo
         self.agent_registry = agent_registry
+        self.components = ComponentManager(services)
         self._jobs: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._closed = False
 
@@ -93,6 +94,8 @@ class LongtermService:
     def authorize(
         self, tenant_id: str, user: User, *, write: bool = False, admin: bool = False
     ) -> str:
+        if write:
+            self.components.require_enabled("octop")
         role = self.repo.role(tenant_id, user.id)
         # Global Octop administrators do not implicitly become tenant members.
         if (
@@ -107,6 +110,7 @@ class LongtermService:
         return self.repo.tenants(user.id)
 
     def create_tenant(self, user: User, name: str) -> dict[str, Any]:
+        self.components.require_enabled("octop")
         return self.repo.create_tenant(new_ulid(), self._name(name), user.id)
 
     @staticmethod
@@ -146,6 +150,7 @@ class LongtermService:
         from octop.infra.longterm.beatdesign_workflow import import_beatdesign_workflow
 
         self.authorize(tenant_id, user, write=True)
+        self.components.require_enabled("beatdesign")
         validate_public_data(document)
         try:
             document_size = len(canonical(document).encode("utf-8"))
@@ -546,7 +551,7 @@ class LongtermService:
             ) -> dict[str, Any]:
                 from octop.infra.longterm.facts import read_fact_report
 
-                root = Path(os.environ["OCTOP_FACT_REPORTS_ROOT"])
+                root = self.components.directory("octop", "fact_reports_subdirectory")
                 report = await asyncio.get_running_loop().run_in_executor(
                     None, read_fact_report, root, current
                 )
@@ -578,7 +583,7 @@ class LongtermService:
                     "evidence_grade": "trusted_readback",
                 }
 
-            use_facts = bool(os.getenv("OCTOP_FACT_REPORTS_ROOT"))
+            use_facts = bool(self.components.resolve("octop")["facts_enabled"])
 
             runtime = LongTermRuntime(
                 self._execute_node,
@@ -693,15 +698,17 @@ class LongtermService:
         from octop.infra.longterm.temporal_runtime import connect, start_task, wake_task
 
         try:
-            address = os.environ.get("OCTOP_TEMPORAL_ADDRESS")
+            self.components.require_enabled("temporal")
+            temporal_config = self.components.resolve("temporal")
+            address = temporal_config["address"]
             if not address:
                 raise RuntimeError("temporal_not_configured")
             async with asyncio.timeout(15):
                 client = await connect(
                     address=address,
-                    namespace=os.getenv("OCTOP_TEMPORAL_NAMESPACE", "default"),
-                    tls=os.getenv("OCTOP_TEMPORAL_TLS", "").lower() in {"1", "true", "yes"},
-                    api_key=os.getenv("OCTOP_TEMPORAL_API_KEY"),
+                    namespace=temporal_config["namespace"],
+                    tls=temporal_config["tls"],
+                    api_key=temporal_config["api_key"] or None,
                 )
                 if task["status"] != "queued":
                     await wake_task(client, tenant_id=task["tenant_id"], task_id=task["task_id"])
@@ -711,7 +718,7 @@ class LongtermService:
                         client,
                         tenant_id=task["tenant_id"],
                         task_id=task["task_id"],
-                        task_queue=os.getenv("OCTOP_TEMPORAL_TASK_QUEUE", "octop-longterm"),
+                        task_queue=temporal_config["task_queue"],
                     )
                     self.repo.append(
                         task["tenant_id"],
@@ -778,11 +785,12 @@ class LongtermService:
 
         self.authorize(tenant_id, user, write=True)
         task = self.task(tenant_id, task_id, user)
-        root = os.getenv("OCTOP_BENCH_RESULTS_ROOT")
-        if not root:
+        self.components.require_enabled("commerceagentbench")
+        root = self.components.directory("commerceagentbench", "results_subdirectory")
+        if not root.is_dir():
             raise OctopError(ErrorCode.LONGTERM_UNAVAILABLE, "benchmark result root not configured")
         # Operators put trusted harness outputs in each tenant's private space directory.
-        result_root = Path(root) / tenant_namespace(tenant_id) / task["space_id"]
+        result_root = root / tenant_namespace(tenant_id) / task["space_id"]
         try:
             report = CommerceBenchAdapter(result_root).load_run(
                 run_dir, expected_task_id=benchmark_task_id
@@ -801,21 +809,48 @@ class LongtermService:
     ) -> dict[str, Any]:
         from octop.infra.longterm.adapters import HindsightAdapter, IntegrationUnavailable
 
-        self.authorize(tenant_id, user, write=data["action"] == "retain")
+        mutating = data["action"] in {"retain", "delete"}
+        self.authorize(tenant_id, user, write=mutating)
         task = self.task(tenant_id, task_id, user)
-        address = os.getenv("OCTOP_HINDSIGHT_URL")
+        self.components.require_enabled("hindsight")
+        memory_config = self.components.resolve("hindsight")
+        address = memory_config["base_url"]
         if not address:
             raise OctopError(ErrorCode.LONGTERM_UNAVAILABLE, "memory not configured")
         validate_public_data(data)
         retaining = data["action"] == "retain"
+        deleting = data["action"] == "delete"
         private_scope = tenant_id + ":space:" + task["space_id"]
         refs: list[str] = []
-        if not retaining and not data["query"].strip():
+        if not mutating and not data["query"].strip():
             raise _invalid("memory_query_required")
-        if retaining:
+        if mutating:
             self.authorize(tenant_id, user, admin=True)
             if not data["consent"]:
                 raise _invalid("memory_consent_required")
+        if deleting:
+            document_id = data.get("document_id", "")
+            if not re.fullmatch(r"octop-[a-f0-9]{64}", document_id):
+                raise _invalid("memory_document_invalid")
+            cursor, registered = 0, False
+            while True:
+                page = self.repo.events(tenant_id, task_id, cursor, 100)
+                for event in page:
+                    payload = event["payload"]
+                    if (
+                        event["event_type"] == "memory.retain"
+                        and payload.get("document_id") == document_id
+                        and payload.get("bank_id") == HindsightAdapter.bank_id(private_scope)
+                    ):
+                        registered = True
+                if len(page) < 100:
+                    break
+                cursor = page[-1]["sequence"]
+            if not registered:
+                raise OctopError(ErrorCode.FORBIDDEN, "memory document not retained by this task")
+            if not self.evidence(tenant_id, task_id, user)["valid"]:
+                raise _invalid("invalid_evidence_chain")
+        if retaining:
             # A benchmark or successful model response cannot manufacture success.
             verified = (
                 task.get("result", {}).get("goal_outcome") == "achieved"
@@ -833,13 +868,13 @@ class LongtermService:
         def before_request() -> None:
             nonlocal dispatched
             self._assert_task_authority(
-                tenant_id, task_id, user, require_admin=retaining, write=retaining
+                tenant_id, task_id, user, require_admin=mutating, write=mutating
             )
             dispatched = True
 
         adapter = HindsightAdapter(
             address,
-            api_key=os.getenv("OCTOP_HINDSIGHT_API_KEY"),
+            api_key=memory_config["api_key"] or None,
             authorization_check=before_request,
         )
         try:
@@ -857,8 +892,8 @@ class LongtermService:
                         "consent": bool(data.get("consent")),
                     },
                     actor_user_id=user.id,
-                    require_admin=retaining,
-                    write=retaining,
+                    require_admin=mutating,
+                    write=mutating,
                 )
             except AuthorityRevoked as exc:
                 raise self._revoked(exc) from exc
@@ -872,6 +907,10 @@ class LongtermService:
                         verified=True,
                         ttl_seconds=data["ttl_seconds"],
                         consent=True,
+                    )
+                elif deleting:
+                    result = await adapter.delete(
+                        tenant_id=private_scope, document_id=document_id, consent=True
                     )
                 else:
                     result = await adapter.recall(
@@ -891,7 +930,7 @@ class LongtermService:
                     task_id,
                     "memory."
                     + data["action"]
-                    + (".uncertain" if retaining and dispatched else ".failed"),
+                    + (".uncertain" if mutating and dispatched else ".failed"),
                     {
                         "operation_id": operation_id,
                         "actor_user_id": user.id,
@@ -909,7 +948,7 @@ class LongtermService:
         finally:
             await adapter.close()
         self._assert_task_authority(
-            tenant_id, task_id, user, require_admin=retaining, write=retaining
+            tenant_id, task_id, user, require_admin=mutating, write=mutating
         )
         return result
 
@@ -944,8 +983,9 @@ class LongtermService:
             )
         except AuthorityRevoked as exc:
             raise self._revoked(exc) from exc
+        self.components.require_enabled("semantica")
         adapter = SemanticaAdapter(
-            self.services.paths.root / "longterm" / "provenance",
+            self.components.directory("semantica", "storage_subdirectory"),
             authorization_check=lambda: self._assert_task_authority(tenant_id, task_id, user),
         )
         indexed = []
@@ -1036,10 +1076,13 @@ class LongtermService:
                 baseline_revision = task.get("active_behavior_revision", task["plan_digest"])
                 generation = None
                 if action == "rna_propose":
-                    sdk_root = os.getenv("OCTOP_RNA_SDK_ROOT")
-                    model_json = os.getenv("OCTOP_RNA_MODEL_JSON")
-                    credential_env = os.getenv("OCTOP_RNA_API_KEY_ENV")
-                    if not sdk_root or not model_json or not credential_env:
+                    self.components.require_enabled("rna")
+                    rna_config = self.components.resolve("rna")
+                    sdk_root = os.getenv("OCTOP_RNA_SDK_ROOT") or str(
+                        Path(__file__).resolve().parents[5] / "rna_dev/packages/sdk"
+                    )
+                    model_json = rna_config["model_json"]
+                    if not model_json:
                         raise OctopError(
                             ErrorCode.LONGTERM_UNAVAILABLE, "RNA SDK model not configured"
                         )
@@ -1061,7 +1104,8 @@ class LongtermService:
                             }
                         ],
                         model=model,
-                        api_key_env=credential_env,
+                        api_key_env="RNA_ADAPTER_API_KEY",
+                        api_key=rna_config["api_key"],
                         authorization_check=lambda: self._assert_task_authority(
                             tenant_id, task_id, user, require_admin=True
                         ),
@@ -1118,8 +1162,11 @@ class LongtermService:
                     or generation_refs != ["octop-rna-generation:" + digest(generation)]
                 ):
                     raise _invalid("rna_generation_audit_changed")
-                root = os.getenv("OCTOP_EVOLUTION_REPORTS_ROOT")
-                if not root:
+                self.components.require_enabled("commerceagentbench")
+                root = self.components.directory(
+                    "commerceagentbench", "evolution_reports_subdirectory"
+                )
+                if not root.is_dir():
                     raise OctopError(
                         ErrorCode.LONGTERM_UNAVAILABLE,
                         "trusted evolution evaluation not configured",
@@ -1168,54 +1215,4 @@ class LongtermService:
             raise _invalid("evolution_input_or_trusted_report_invalid") from exc
 
     def integrations(self) -> list[dict[str, Any]]:
-        roots = Path(__file__).resolve().parents[5]
-
-        def installed(module: str) -> bool:
-            try:
-                return importlib.util.find_spec(module) is not None
-            except (ImportError, ValueError):
-                return False
-
-        return [
-            {"id": "octop", "name": "Octop", "status": "ready", "detail": "offline_control_plane"},
-            {
-                "id": "temporal",
-                "name": "Temporal Python SDK",
-                "status": "configured"
-                if os.getenv("OCTOP_TEMPORAL_ADDRESS") and installed("temporalio")
-                else "unconfigured",
-                "detail": "connection_not_probed",
-            },
-            {
-                "id": "beatdesign",
-                "name": "BeatDesign",
-                "status": "available" if (roots / "BeatDesign").is_dir() else "unconfigured",
-                "detail": "semantic_workflow_import",
-            },
-            {
-                "id": "semantica",
-                "name": "Semantica",
-                "status": "available" if installed("semantica") else "unconfigured",
-                "detail": "provenance_export_optional",
-            },
-            {
-                "id": "hindsight",
-                "name": "Hindsight",
-                "status": "configured" if os.getenv("OCTOP_HINDSIGHT_URL") else "unconfigured",
-                "detail": "connection_not_probed",
-            },
-            {
-                "id": "commerceagentbench",
-                "name": "CommerceAgentBench",
-                "status": "configured" if os.getenv("OCTOP_BENCH_RESULTS_ROOT") else "unconfigured",
-                "detail": "verified_result_bundle_import",
-            },
-            {
-                "id": "rna",
-                "name": "RNA",
-                "status": "available"
-                if (roots / "rna_dev" / "packages" / "sdk").is_dir()
-                else "unconfigured",
-                "detail": "candidate_only_gated_promotion",
-            },
-        ]
+        return [dict(component) for component in self.components.catalog()["components"]]

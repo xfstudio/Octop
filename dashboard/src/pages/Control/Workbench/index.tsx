@@ -1,6 +1,7 @@
-import { useCallback, useMemo } from "react";
+import { lazy, Suspense, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Globe, TerminalSquare } from "lucide-react";
+import { Boxes, Globe, TerminalSquare } from "lucide-react";
+import PageLoading from "../../../components/PageLoading";
 import PageShell from "../../../layouts/PageShell";
 import { usePathTabs } from "../../../hooks/usePathTabs";
 import { useCurrentUser } from "../../../hooks/useCurrentUser";
@@ -9,14 +10,18 @@ import TerminalPage from "../Terminal";
 import RemoteBrowserPage from "../RemoteBrowser";
 import styles from "./index.module.less";
 
-export type WorkbenchTab = "terminal" | "browser";
+const PlatformPage = lazy(() => import("../../Longterm"));
+
+export type WorkbenchTab = "platform" | "terminal" | "browser";
 
 const WORKBENCH_TABS = [
+  "platform",
   "browser",
   "terminal",
 ] as const satisfies readonly WorkbenchTab[];
 
 const TAB_ICONS = {
+  platform: Boxes,
   browser: Globe,
   terminal: TerminalSquare,
 } as const;
@@ -32,12 +37,10 @@ export default function WorkbenchPage({
   const { t } = useTranslation();
   const user = useCurrentUser();
   const isAllowed = useCallback(
-    (tab: WorkbenchTab) => userCan(user, tab),
+    (tab: WorkbenchTab) => tab === "platform" || userCan(user, tab),
     [user],
   );
-  const defaultTab: WorkbenchTab = userCan(user, "browser")
-    ? "browser"
-    : "terminal";
+  const defaultTab: WorkbenchTab = "platform";
 
   const { activeTab, handleTabChange, isMounted } = usePathTabs({
     basePath: "/workbench",
@@ -79,6 +82,21 @@ export default function WorkbenchPage({
       pathTabs={pathTabs}
     >
       <div className={styles.panels}>
+        {isMounted("platform") && (
+          <div
+            className={styles.panel}
+            style={{ display: activeTab === "platform" ? "flex" : "none" }}
+            aria-hidden={activeTab !== "platform"}
+          >
+            <Suspense fallback={<PageLoading />}>
+              <PlatformPage
+                key={user?.id ?? "offline"}
+                embedded
+                isVisible={isVisible && activeTab === "platform"}
+              />
+            </Suspense>
+          </div>
+        )}
         {isMounted("browser") && (
           <div
             className={styles.panel}

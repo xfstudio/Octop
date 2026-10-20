@@ -29,7 +29,10 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { canAccessPath } from "../../utils/permissions";
+import ComponentCenter from "./ComponentCenter";
+import ComponentOperations, { ComponentArtifacts } from "./ComponentOperations";
 import PageShell from "../../layouts/PageShell";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useServerTimezone } from "../../hooks/useServerTimezone";
@@ -101,11 +104,33 @@ interface NodeForm {
 
 export default function LongtermPage({
   standalone = false,
+  embedded = false,
+  isVisible = true,
 }: {
   standalone?: boolean;
+  embedded?: boolean;
+  isVisible?: boolean;
 }) {
   const { t } = useTranslation();
   const user = useCurrentUser();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedSection = searchParams.get("section");
+  const activeSection = ["workflow", "sync", "tasks", "integrations"].includes(
+    requestedSection ?? "",
+  )
+    ? requestedSection!
+    : standalone
+    ? "workflow"
+    : "integrations";
+  const navigateSection = (
+    section: "workflow" | "sync" | "tasks" | "integrations",
+  ) => {
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.set("section", section);
+      return next;
+    });
+  };
   const timezone = useServerTimezone(!standalone);
   const [bootstrap] = useState(() => {
     try {
@@ -162,8 +187,6 @@ export default function LongtermPage({
     task: LongtermTask;
     kind: TaskOperation;
   } | null>(null);
-  const [operationInput, setOperationInput] = useState("");
-  const [operationResult, setOperationResult] = useState<unknown>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const importRef = useRef<HTMLInputElement>(null);
   const beatdesignFileRef = useRef<HTMLInputElement>(null);
@@ -174,13 +197,17 @@ export default function LongtermPage({
     (item) => item.id === local.active_workspace_id,
   )!;
   const config = workspace.config;
-  const connected = !!user && online;
+  const connected = !!user && online && isVisible;
   const targetReady = connected && !!tenantId && !!spaceId;
   const boundRevision =
     workspace.sync?.tenant_id === tenantId &&
     workspace.sync?.space_id === spaceId
       ? workspace.sync.revision
       : 0;
+
+  useEffect(() => {
+    setOperation(null);
+  }, [tenantId, spaceId]);
 
   useEffect(() => {
     if (storageBlocked) return;
@@ -649,53 +676,7 @@ export default function LongtermPage({
   }
 
   function openOperation(task: LongtermTask, kind: TaskOperation) {
-    const body = {
-      evaluate: { run_dir: "" },
-      evolution: {
-        action: "propose",
-        proposal: { summary: "", hypothesis: "" },
-        benchmark_revision: "",
-      },
-      memory: { action: "recall", query: "", max_tokens: 2048 },
-      provenance: { consent: false },
-    }[kind];
     setOperation({ task, kind });
-    setOperationInput(json(body));
-    setOperationResult(null);
-  }
-
-  async function submitOperation() {
-    if (!operation) return;
-    await run(async () => {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(operationInput);
-      } catch {
-        throw new Error(t("longterm.jsonObjectRequired"));
-      }
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-        throw new Error(t("longterm.jsonObjectRequired"));
-      const body = parsed as Record<string, unknown>;
-      const paths = credentialPaths(body);
-      if (paths.length)
-        throw new Error(
-          t("longterm.credentialsBlocked", { paths: paths.join(", ") }),
-        );
-      const result = await longtermApi.taskOperation(
-        operation.task.tenant_id,
-        operation.task.task_id,
-        operation.kind,
-        {
-          ...body,
-          ...(["evaluate", "evolution"].includes(operation.kind)
-            ? { expected_revision: operation.task.revision }
-            : {}),
-        },
-      );
-      setOperationResult(result);
-      setRefreshKey((value) => value + 1);
-      message.success(t("longterm.operationCompleted"));
-    });
   }
 
   async function openMembers() {
@@ -875,7 +856,10 @@ export default function LongtermPage({
         </div>
       </Card>
       <Tabs
-        defaultActiveKey="workflow"
+        activeKey={activeSection}
+        onChange={(key) =>
+          navigateSection(key as "workflow" | "sync" | "tasks" | "integrations")
+        }
         items={[
           {
             key: "workflow",
@@ -1279,52 +1263,21 @@ export default function LongtermPage({
             key: "integrations",
             label: t("longterm.integrationsTab"),
             children: (
-              <div className={styles.content}>
-                <Alert
-                  type="info"
-                  showIcon
-                  message={t("longterm.integrationHint")}
-                />
-                <Table
-                  rowKey="id"
-                  dataSource={integrations}
-                  pagination={false}
-                  scroll={{ x: 620 }}
-                  locale={{ emptyText: t("longterm.noIntegrations") }}
-                  columns={[
-                    {
-                      title: t("longterm.integration"),
-                      dataIndex: "name",
-                      render: (name: string, row: IntegrationStatus) => (
-                        <>
-                          <Text strong>{name}</Text>
-                          <br />
-                          <Text type="secondary">{row.id}</Text>
-                        </>
-                      ),
-                    },
-                    {
-                      title: t("longterm.status"),
-                      dataIndex: "status",
-                      render: (status: string) => (
-                        <Tag>
-                          {t(`longterm.integrationStatuses.${status}`, {
-                            defaultValue: status,
-                          })}
-                        </Tag>
-                      ),
-                    },
-                    {
-                      title: t("longterm.detail"),
-                      dataIndex: "detail",
-                      render: (value: string) =>
-                        t(`longterm.integrationDetails.${value}`, {
-                          defaultValue: value,
-                        }),
-                    },
-                  ]}
-                />
-              </div>
+              <ComponentCenter
+                connected={connected}
+                isAdmin={user?.role === "admin"}
+                actorId={user?.id}
+                tenantId={tenantId}
+                spaceId={spaceId}
+                tenantRole={
+                  tenants.find((tenant) => tenant.tenant_id === tenantId)?.role
+                }
+                tasks={spaceId ? visibleTasks : []}
+                canAccessPath={(path) => canAccessPath(user, path)}
+                onNavigate={navigateSection}
+                onOperation={(kind, task) => openOperation(task, kind)}
+                onChanged={() => setRefreshKey((value) => value + 1)}
+              />
             ),
           },
         ]}
@@ -1363,6 +1316,11 @@ export default function LongtermPage({
           </div>
           {content}
         </main>
+      ) : embedded ? (
+        <section className={styles.embedded}>
+          <div className={styles.embeddedActions}>{headerActions}</div>
+          {content}
+        </section>
       ) : (
         <PageShell
           title={t("longterm.title")}
@@ -1374,7 +1332,7 @@ export default function LongtermPage({
       )}
       <Modal
         title={t(`longterm.newNames.${nameDialog ?? "local"}`)}
-        open={!!nameDialog}
+        open={isVisible && !!nameDialog}
         onCancel={() => setNameDialog(null)}
         onOk={() => void createNamed()}
         confirmLoading={busy}
@@ -1391,7 +1349,7 @@ export default function LongtermPage({
       </Modal>
       <Modal
         title={t("longterm.editNode")}
-        open={!!nodeDialog}
+        open={isVisible && !!nodeDialog}
         onCancel={() => setNodeDialog(null)}
         onOk={() => void saveNode().catch(() => undefined)}
         width={680}
@@ -1488,7 +1446,7 @@ export default function LongtermPage({
       </Modal>
       <Modal
         title={t("longterm.beatdesignImport")}
-        open={beatdesignOpen}
+        open={isVisible && beatdesignOpen}
         onCancel={() => setBeatdesignOpen(false)}
         onOk={applyBeatDesign}
         okText={t("longterm.beatdesignApply")}
@@ -1559,7 +1517,7 @@ export default function LongtermPage({
       </Modal>
       <Drawer
         title={t("longterm.taskDetail")}
-        open={!!detail}
+        open={isVisible && !!detail}
         onClose={() => {
           setDetail(null);
           setEvidence(null);
@@ -1718,6 +1676,11 @@ export default function LongtermPage({
                   ),
                 },
                 {
+                  key: "artifacts",
+                  label: t("componentOperations.artifacts"),
+                  children: <ComponentArtifacts task={detail} />,
+                },
+                {
                   key: "result",
                   label: t("longterm.result"),
                   children: (
@@ -1740,7 +1703,7 @@ export default function LongtermPage({
       </Drawer>
       <Modal
         title={t("longterm.approvalTitle")}
-        open={!!approval}
+        open={isVisible && !!approval}
         onCancel={() => setApproval(null)}
         onOk={() => {
           if (approval) void commandTask(approval, "approve", approvalNodeId);
@@ -1827,7 +1790,7 @@ export default function LongtermPage({
       </Modal>
       <Modal
         title={t("longterm.manageMembers")}
-        open={!!membersTenant}
+        open={isVisible && !!membersTenant}
         onCancel={() => setMembersTenant("")}
         footer={null}
         width={680}
@@ -1891,45 +1854,40 @@ export default function LongtermPage({
           />
         </div>
       </Modal>
-      <Modal
-        title={operation ? t(`longterm.operationNames.${operation.kind}`) : ""}
-        open={!!operation}
-        onCancel={() => setOperation(null)}
-        onOk={() => void submitOperation()}
-        confirmLoading={busy}
-        okText={t("longterm.submitOperation")}
-        okButtonProps={{ disabled: operationResult !== null }}
-        width={760}
-      >
-        {operation && (
-          <div className={styles.content}>
-            <Alert
-              type="info"
-              showIcon
-              message={t(`longterm.operationHints.${operation.kind}`)}
-            />
-            <Form layout="vertical">
-              <Form.Item label={t("longterm.operationInput")}>
-                <Input.TextArea
-                  className={styles.codeInput}
-                  rows={10}
-                  value={operationInput}
-                  onChange={(event) => {
-                    setOperationInput(event.target.value);
-                    setOperationResult(null);
-                  }}
-                />
-              </Form.Item>
-            </Form>
-            {operationResult !== null && (
-              <>
-                <Text strong>{t("longterm.operationResult")}</Text>
-                <pre className={styles.json}>{json(operationResult)}</pre>
-              </>
+      {operation &&
+        connected &&
+        operation.task.tenant_id === tenantId &&
+        operation.task.space_id === spaceId && (
+          <ComponentOperations
+            key={`${operation.task.task_id}:${operation.kind}`}
+            task={
+              detail?.task_id === operation.task.task_id
+                ? detail
+                : tasks.find(
+                    (task) => task.task_id === operation.task.task_id,
+                  ) ?? operation.task
+            }
+            kind={operation.kind}
+            role={tenants.find((tenant) => tenant.tenant_id === tenantId)?.role}
+            integration={integrations.find(
+              (item) =>
+                item.id ===
+                {
+                  memory: "hindsight",
+                  evaluate: "commerceagentbench",
+                  evolution: "rna",
+                  provenance: "semantica",
+                }[operation.kind],
             )}
-          </div>
+            onCancel={() => setOperation(null)}
+            onSuccess={() => setRefreshKey((value) => value + 1)}
+            onManageComponent={() => {
+              setOperation(null);
+              setDetail(null);
+              navigateSection("integrations");
+            }}
+          />
         )}
-      </Modal>
     </>
   );
 }

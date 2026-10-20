@@ -63,6 +63,50 @@ class LongtermRepo:
             )
         return {"tenant_id": tenant_id, "name": name, "role": "owner", "revision": 1}
 
+    def bind_project(
+        self,
+        tenant_id: str,
+        user_id: int,
+        key: str,
+        expected: str | None,
+        value: str,
+        audit_payload: str,
+    ) -> bool:
+        """Commit a binding and its live host/tenant authority in one transaction."""
+        with self.scoped(tenant_id) as conn:
+            lock = " FOR SHARE" if self._db.dialect == "postgresql" else ""
+            member = conn.execute(
+                "SELECT role FROM bm_memberships WHERE tenant_id=? AND user_id=?" + lock,
+                (tenant_id, user_id),
+            ).fetchone()
+            actor = conn.execute(
+                "SELECT role,disabled,username FROM users WHERE id=?" + lock, (user_id,)
+            ).fetchone()
+            if (
+                member is None
+                or member["role"] not in {"owner", "admin"}
+                or actor is None
+                or actor["disabled"]
+                or actor["role"] != "admin"
+            ):
+                raise AuthorityRevoked("project binding authority revoked")
+            if expected is None:
+                cursor = conn.execute(
+                    "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO NOTHING",
+                    (key, value),
+                )
+            else:
+                cursor = conn.execute(
+                    "UPDATE settings SET value=? WHERE key=? AND value=?", (value, key, expected)
+                )
+            if cursor.rowcount != 1:
+                return False
+            conn.execute(
+                "INSERT INTO audit_log(ts,actor,action,target,payload) VALUES(?,?,?,?,?)",
+                (now_ts(), actor["username"], "longterm.project.binding", tenant_id, audit_payload),
+            )
+            return True
+
     def role(self, tenant_id: str, user_id: int) -> str | None:
         with self._db.connect() as conn:
             row = conn.execute(

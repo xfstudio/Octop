@@ -199,8 +199,10 @@ export default defineConfig(({ mode }) => {
           // still use NetworkFirst rather than a pinned app shell.
           globPatterns: [
             "index.html",
-            "assets/index.*.js",
-            "assets/vendor-*.js",
+            // The offline workbench also depends on shared helper and locale
+            // chunks. Their names change as routes share code, so cache all
+            // hashed JavaScript instead of relying on entry chunk names.
+            "assets/*.js",
             "assets/*.{css,woff2}",
           ],
           manifestTransforms: [

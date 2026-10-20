@@ -11,7 +11,18 @@ import { isWorkbenchPath, resolveSelectedKey, routeConfigs } from "./index";
 describe("pathPermissionKeys", () => {
   it("matches workbench and legacy aliases", () => {
     expect(isWorkbenchPath("/workbench")).toBe(true);
-    expect(pathPermissionKeys("/workbench")).toEqual([...PERM.workbench]);
+    expect(pathPermissionKeys("/workbench")).toBeNull();
+    expect(pathPermissionKeys("/workbench/platform")).toBeNull();
+    expect(
+      canAccessPath({ role: "user", permissions: [] }, "/workbench/platform"),
+    ).toBe(true);
+    expect(
+      canAccessPath({ role: "user", permissions: [] }, "/workbench/terminal"),
+    ).toBe(false);
+    expect(
+      canAccessPath({ role: "user", permissions: [] }, "/workbench/browser"),
+    ).toBe(false);
+    expect(resolveSelectedKey("/workbench/platform")).toBe("longterm");
     expect(pathPermissionKeys("/workbench/terminal")).toEqual([
       ...PERM.terminal,
     ]);

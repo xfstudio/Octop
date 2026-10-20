@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 
-from octop.api.deps import current_user, get_server
+from octop.api.deps import current_user, get_server, require_admin
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.longterm.execution import WorkflowValidationError
 from octop.infra.longterm.service import LongtermService, RevisionConflict
@@ -37,6 +37,49 @@ class IntegrationResponse(ResourceResponse):
 
 class IntegrationsResponse(ResourceResponse):
     integrations: list[IntegrationResponse]
+
+
+class ComponentFieldResponse(BaseModel):
+    key: str
+    type: Literal["string", "boolean"]
+    secret: bool
+    required: bool
+    configured: bool
+    value: str | bool | None = None
+
+
+class ComponentResponse(IntegrationResponse):
+    configured: bool
+    healthy: bool | None
+    checked_at: int | None
+    fields: list[ComponentFieldResponse]
+    actions: list[str]
+
+
+class ComponentCatalogResponse(BaseModel):
+    can_manage: bool
+    scope: Literal["server"]
+    components: list[ComponentResponse]
+
+
+class ComponentConfigResponse(BaseModel):
+    component_id: str
+    values: dict[str, str | bool]
+    secret_configured: dict[str, bool]
+    fields: list[ComponentFieldResponse]
+
+
+class ComponentCheckEntry(BaseModel):
+    code: str
+    ok: bool
+
+
+class ComponentCheckResponse(BaseModel):
+    component_id: str
+    configured: bool
+    healthy: bool
+    checked_at: int
+    checks: list[ComponentCheckEntry]
 
 
 class TenantResponse(ResourceResponse):
@@ -168,6 +211,12 @@ class NamedBody(StrictBody):
     name: str = Field(min_length=1, max_length=120)
 
 
+class ComponentConfigBody(StrictBody):
+    values: dict[str, Any] = Field(default_factory=dict, max_length=20)
+    secrets: dict[str, str] = Field(default_factory=dict, max_length=5)
+    clear_secrets: list[str] = Field(default_factory=list, max_length=5)
+
+
 class MemberBody(StrictBody):
     user_id: int = Field(gt=0)
     role: Literal["admin", "member", "viewer"] | None = None
@@ -204,12 +253,13 @@ class EvaluationBody(StrictBody):
 
 
 class MemoryBody(StrictBody):
-    action: Literal["recall", "retain"]
+    action: Literal["recall", "retain", "delete"]
     query: str = Field(default="", max_length=8000)
     content: str = Field(default="", max_length=16000)
     max_tokens: int = Field(default=2048, ge=128, le=4096)
     ttl_seconds: int = Field(default=2592000, ge=60, le=31536000)
     consent: bool = False
+    document_id: str = Field(default="", max_length=100)
 
 
 class EvolutionBody(StrictBody):
@@ -260,6 +310,64 @@ async def integrations(
     user: User = Depends(current_user), svc: LongtermService = Depends(service)
 ) -> dict[str, Any]:
     return {"integrations": svc.integrations()}
+
+
+@router.get(
+    "/integrations/catalog",
+    response_model=ComponentCatalogResponse,
+    summary="List seven components with redacted health and administrator field schemas",
+)
+async def component_catalog(
+    user: User = Depends(current_user), svc: LongtermService = Depends(service)
+) -> dict[str, Any]:
+    return await asyncio.get_running_loop().run_in_executor(None, svc.components.catalog, user)
+
+
+@router.get(
+    "/integrations/{component_id}/config",
+    response_model=ComponentConfigResponse,
+    summary="Read effective device-local component configuration as a global administrator",
+    description="Credential values are never returned; secret_configured only indicates presence.",
+)
+async def component_config(
+    component_id: str,
+    user: User = Depends(require_admin()),
+    svc: LongtermService = Depends(service),
+) -> dict[str, Any]:
+    return svc.components.config(component_id, user)
+
+
+@router.put(
+    "/integrations/{component_id}/config",
+    response_model=ComponentConfigResponse,
+    summary="Patch approved settings and write-only credentials as a global administrator",
+    description="Omitted or empty credentials are retained. clear_secrets explicitly clears them. Directory values must remain below managed roots. Temporal worker connection changes require a worker restart.",
+)
+async def save_component_config(
+    component_id: str,
+    body: ComponentConfigBody,
+    user: User = Depends(require_admin()),
+    svc: LongtermService = Depends(service),
+) -> dict[str, Any]:
+    from functools import partial
+
+    return await asyncio.get_running_loop().run_in_executor(
+        None, partial(svc.components.save, component_id, user, **body.model_dump())
+    )
+
+
+@router.post(
+    "/integrations/{component_id}/check",
+    response_model=ComponentCheckResponse,
+    summary="Probe a component with bounded read-only operations as a global administrator",
+    description="Performs local dependency or authenticated service checks without invoking models, running benchmarks or launching jobs. configured is separate from confirmed health.",
+)
+async def check_component(
+    component_id: str,
+    user: User = Depends(require_admin()),
+    svc: LongtermService = Depends(service),
+) -> dict[str, Any]:
+    return await svc.components.check(component_id, user)
 
 
 @router.get(

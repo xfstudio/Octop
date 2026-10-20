@@ -308,7 +308,7 @@
     "saveFailed": "Could not save the navigation layout",
     "dragToReorder": "Drag to reorder",
     "chatHistory": "Session list",
-    "longterm": "Long-running agents"
+    "longterm": "Agent workbench"
   },
   "skillPackages": {
     "title": "Skill Packages",
@@ -4873,10 +4873,11 @@
   },
   "workbench": {
     "title": "Workbench",
-    "description": "View and take over the expert's terminal and browser, and follow execution in real time",
+    "description": "Manage components, orchestrate agents, and track long-running tasks",
     "tabs": {
       "terminal": "Terminal",
-      "browser": "Browser"
+      "browser": "Browser",
+      "platform": "Components & tasks"
     }
   },
   "remoteDesktopHub": {
@@ -7038,7 +7039,7 @@
     "workflowTab": "Workflow",
     "syncTab": "Tenants and sync",
     "tasksTab": "Long-running tasks",
-    "integrationsTab": "Integrations",
+    "integrationsTab": "Components & operations",
     "workspaceName": "Device configuration name",
     "executionMode": "Execution engine",
     "localExecutionHint": "Local execution uses Octop. Temporal mode requires a connected Temporal service and worker.",

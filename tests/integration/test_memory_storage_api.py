@@ -184,11 +184,12 @@ async def test_backup_deletion_excludes_maintenance_and_restore(
     )
     base = f"/api/agents/{aid}/memory/storage"
     release = threading.Event()
-    started = threading.Event()
+    started = asyncio.Event()
+    loop = asyncio.get_running_loop()
 
     def slow_delete(*args):
-        started.set()
-        assert release.wait(10)
+        loop.call_soon_threadsafe(started.set)
+        assert release.wait(60)
 
     monkeypatch.setattr(sqlite_restore, "delete_backup", slow_delete)
     deleting = asyncio.create_task(
@@ -200,7 +201,9 @@ async def test_backup_deletion_excludes_maintenance_and_restore(
         )
     )
     try:
-        assert await asyncio.to_thread(started.wait, 5)
+        # Coverage tracing can make the real HTTP/auth path exceed five seconds.
+        # Wait for the worker's signal without occupying another executor thread.
+        await asyncio.wait_for(started.wait(), timeout=30)
         assert coordinator.busy
         for method, suffix, body in (
             ("POST", "/maintenance", {"confirmed": True}),
