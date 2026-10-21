@@ -11,6 +11,8 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from .input_bindings import validate_input_bindings
+
 STAGES = ("Observe", "Diagnose", "Plan", "Compile", "Act", "Verify", "Evaluate")
 DECISIONS = frozenset(
     {"continue", "replan", "sleep_until", "human_required", "achieved", "stopped"}
@@ -79,6 +81,14 @@ def validate_workflow(workflow: dict[str, Any]) -> list[dict[str, Any]]:
         )
         if node.get("skill") == "local.echo":
             node["risk"] = "R0"
+        try:
+            validate_input_bindings(node.get("input", {}), set(dependencies))
+            if node.get("skill") == "component.call":
+                from .component_calls import validate_component_call
+
+                validate_component_call(node)
+        except ValueError as exc:
+            raise WorkflowValidationError(str(exc)) from exc
         # JSON-only data is a persistence and Temporal serialization requirement.
         try:
             canonical_json(node)
@@ -236,7 +246,7 @@ def token_reservation(
     This is a reservation, not measured provider usage. Hidden provider context
     can only be known from its returned usage and is accounted for afterwards.
     """
-    if node.get("skill") == "local.echo":
+    if node.get("skill") in {"local.echo", "component.call"}:
         return 0
     context = {
         "goal": task["goal"],

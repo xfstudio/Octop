@@ -335,3 +335,63 @@ def test_unified_compose_sources_are_overridable_build_contexts(compose: dict[st
             assert services[name]["build"]["additional_contexts"][context].startswith(
                 "${" + variable + ":-../"
             )
+
+
+def test_watch_keeps_api_and_worker_code_in_sync_without_overwriting_assets_or_data(
+    compose: dict[str, Any],
+) -> None:
+    services = compose["services"]
+    watch = services["octop"]["develop"]["watch"]
+    assert services["worker"]["develop"]["watch"] == watch
+    sync = {rule["target"]: rule for rule in watch if rule["action"] == "sync+restart"}
+    assert set(sync) == {
+        "/app/src/octop",
+        "/opt/rna/packages/sdk/src",
+        "/opt/rna/packages/sdk/skills",
+        "/opt/semantica/semantica",
+    }
+    assert sync["/app/src/octop"]["path"] == "./src/octop"
+    assert "dashboard/" in sync["/app/src/octop"]["ignore"]
+    assert "static/" in sync["/opt/semantica/semantica"]["ignore"]
+    for rule in sync.values():
+        assert {"**/.git/", "**/.env", "**/.env.*", "**/.octop/", "**/node_modules/"} <= set(
+            rule["ignore"]
+        )
+        assert not any(
+            rule["target"].startswith(target)
+            for target, _read_only in _mounts(services["octop"]).values()
+        )
+
+
+def test_watch_rebuilds_frontends_and_named_context_components_instead_of_serving_stale_output(
+    compose: dict[str, Any],
+) -> None:
+    services = compose["services"]
+    rebuild = {
+        name: {
+            rule["path"]
+            for rule in service.get("develop", {}).get("watch", [])
+            if rule["action"] == "rebuild"
+        }
+        for name, service in services.items()
+    }
+    for name in ("octop", "worker"):
+        assert {"./dashboard", "./pyproject.toml", "./uv.lock", "./docker/Dockerfile"} <= rebuild[
+            name
+        ]
+    expected = {
+        "beatdesign": {"${BEATDESIGN_SOURCE:-../BeatDesign}"},
+        "rna": {
+            "${RNA_SOURCE:-../rna_dev}/prototypes/control-center",
+            "${RNA_SOURCE:-../rna_dev}/packages/sdk",
+        },
+        "semantica": {"${SEMANTICA_SOURCE:-../semantica}"},
+        "commerceagentbench": {"${BENCHMARK_SOURCE:-../CommerceAgentBench}"},
+    }
+    for name, paths in expected.items():
+        assert paths <= rebuild[name]
+        assert all(rule["action"] == "rebuild" for rule in services[name]["develop"]["watch"])
+    assert rebuild["hindsight"] == {
+        "./docker/stack/Dockerfile.hindsight",
+        "./docker/stack/hindsight_entrypoint.py",
+    }

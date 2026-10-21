@@ -1,6 +1,58 @@
-import type { WorkspaceConfig, WorkflowNode } from "../../api/modules/longterm";
+import type {
+  ComponentOperationDefinition,
+  WorkspaceConfig,
+  WorkflowNode,
+} from "../../api/modules/longterm";
 
 export const LOCAL_WORKSPACES_KEY = "octop:longterm:workspaces:v1";
+
+/** Bundled operation metadata keeps workflow editing available without a server. */
+export const DEFAULT_COMPONENT_OPERATIONS: ComponentOperationDefinition[] = [
+  ...[
+    "project",
+    "canvas",
+    "assets",
+    "skills",
+    "generation_models",
+    "generation_history",
+    "editor",
+    "editor_diagnostics",
+  ].map((operation) => ({
+    component_id: "beatdesign",
+    operation,
+    risk: "R0" as const,
+    input_example: {},
+    project_required: true,
+  })),
+  ...["genes", "observability"].map((operation) => ({
+    component_id: "rna",
+    operation,
+    risk: "R0" as const,
+    input_example: {},
+    project_required: true,
+  })),
+  {
+    component_id: "hindsight",
+    operation: "recall",
+    risk: "R0",
+    input_example: { query: "", max_tokens: 4096 },
+    project_required: false,
+  },
+  {
+    component_id: "commerceagentbench",
+    operation: "report",
+    risk: "R0",
+    input_example: { run_dir: "" },
+    project_required: false,
+  },
+  {
+    component_id: "semantica",
+    operation: "index",
+    risk: "R1",
+    input_example: { consent: true },
+    project_required: false,
+  },
+];
 
 export function localIdentifier(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -62,6 +114,15 @@ export function isWorkspaceConfig(value: unknown): value is WorkspaceConfig {
       (node) =>
         node &&
         typeof node.id === "string" &&
+        (node.skill === undefined || typeof node.skill === "string") &&
+        (node.agent_id === undefined || typeof node.agent_id === "string") &&
+        (node.component_id === undefined ||
+          typeof node.component_id === "string") &&
+        (node.operation === undefined || typeof node.operation === "string") &&
+        (node.skill !== "component.call" ||
+          (!!node.component_id?.trim() && !!node.operation?.trim())) &&
+        (node.skill === "component.call" ||
+          (node.component_id === undefined && node.operation === undefined)) &&
         Array.isArray(node.depends_on) &&
         node.depends_on.every((id) => typeof id === "string") &&
         ["R0", "R1", "R2", "R3"].includes(node.risk) &&
@@ -104,6 +165,12 @@ export function portableConfiguration(
         id: node.id,
         ...(node.agent_id ? { agent_id: node.agent_id } : {}),
         ...(node.skill ? { skill: node.skill } : {}),
+        ...(node.skill === "component.call" && node.component_id
+          ? { component_id: node.component_id }
+          : {}),
+        ...(node.skill === "component.call" && node.operation
+          ? { operation: node.operation }
+          : {}),
         depends_on: [...node.depends_on],
         risk: node.risk,
         input: node.input,
@@ -145,12 +212,15 @@ export function credentialPaths(value: unknown, path = ""): string[] {
 
 export function workflowProblem(
   nodes: WorkflowNode[],
+  operations: ComponentOperationDefinition[] = DEFAULT_COMPONENT_OPERATIONS,
 ):
   | "empty"
   | "duplicate"
   | "cycle"
   | "dependency"
   | "agent"
+  | "component"
+  | "reference"
   | "forbidden"
   | null {
   if (!nodes.length) return "empty";
@@ -174,7 +244,53 @@ export function workflowProblem(
   if (nodes.some((node) => hasCycle(node.id))) return "cycle";
   if (nodes.some((node) => node.risk === "R3")) return "forbidden";
   if (
-    nodes.some((node) => node.skill !== "local.echo" && !node.agent_id?.trim())
+    nodes.some((node) => {
+      if (node.skill !== "component.call")
+        return node.component_id !== undefined || node.operation !== undefined;
+      const operation = operations.find(
+        (item) =>
+          item.component_id === node.component_id &&
+          item.operation === node.operation,
+      );
+      return (
+        !operation ||
+        operation.risk !== node.risk ||
+        (node.component_id === "semantica" &&
+          node.operation === "index" &&
+          node.input.consent !== true)
+      );
+    })
+  )
+    return "component";
+  const validReferences = (value: unknown, dependencies: string[]): boolean => {
+    if (!value || typeof value !== "object") return true;
+    if (Array.isArray(value))
+      return value.every((item) => validReferences(item, dependencies));
+    const record = value as Record<string, unknown>;
+    if ("$node" in record)
+      return (
+        typeof record.$node === "string" &&
+        dependencies.includes(record.$node) &&
+        Object.keys(record).every((key) =>
+          ["$node", "pointer"].includes(key),
+        ) &&
+        (record.pointer === undefined ||
+          (typeof record.pointer === "string" &&
+            (record.pointer === "" || record.pointer.startsWith("/")) &&
+            !/~(?:[^01]|$)/.test(record.pointer)))
+      );
+    return Object.values(record).every((item) =>
+      validReferences(item, dependencies),
+    );
+  };
+  if (nodes.some((node) => !validReferences(node.input, node.depends_on)))
+    return "reference";
+  if (
+    nodes.some(
+      (node) =>
+        !["local.echo", "component.call"].includes(node.skill ?? "") &&
+        !node.agent_id?.trim(),
+    )
   )
     return "agent";
   return null;

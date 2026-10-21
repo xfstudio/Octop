@@ -7056,6 +7056,18 @@
     "agentRequired": "Enter an agent ID.",
     "skill": "Skill reference",
     "skillHint": "Optional; use the name of an installed runtime skill.",
+    "nodeKind": "Step type",
+    "nodeKinds": {
+      "agent": "Agent and skill",
+      "local": "Local check (local.echo)",
+      "component": "Component call"
+    },
+    "nodeComponent": "Component",
+    "nodeOperation": "Component operation",
+    "componentSkillHint": "Select Component call as the step type, then choose a component and operation.",
+    "componentNodeHint": "Component steps do not require an agent ID. The operation sets the risk level. A bundled catalog supports offline editing; the server validates component configuration at execution.",
+    "componentProjectRequired": "Bind the current tenant's project in component management before execution.",
+    "dependencyInputHint": "Reference a successful dependency result with, for example, {\"query\":{\"$node\":\"seed\",\"pointer\":\"/result/output/query\"}}. Use a JSON Pointer; omit it to reference the entire result including status and result.",
     "dependencies": "Dependencies",
     "risk": "Risk level",
     "riskHint": "R1 / R2 require approval for the exact step and plan digest. R3 execution is forbidden.",
@@ -7144,7 +7156,9 @@
       "duplicate": "Step IDs must be unique and nonempty.",
       "cycle": "The workflow contains a dependency cycle.",
       "dependency": "A workflow dependency does not exist.",
-      "agent": "Every agent execution step requires an agent ID (except local.echo).",
+      "agent": "Every agent execution step requires an agent ID. Local checks and component calls may leave it empty.",
+      "component": "Choose a valid component and operation with its required risk level. Semantica indexing requires consent to be true.",
+      "reference": "Result references require a valid JSON Pointer and may only reference declared dependencies.",
       "forbidden": "R3 steps cannot execute. Remove them or reassess their risk."
     },
     "statuses": {

@@ -122,8 +122,21 @@ uv run --no-sync pytest tests/unit/longterm/test_runtime_temporal_live.py -m liv
 - 通过根 Compose 的 `up -d --build --wait --wait-timeout 900`，九个长驻服务均达到 healthy，初始化器正常退出 0。最终镜像的 **64 项实际 HTTP 检查全部通过**：包括七组件连接检查、本机与 Temporal 的实际 echo 执行、输出校验、有效证据哈希链、完整 Semantica 索引回读、普通租户拒绝管理宿主服务，以及六个外部组件的真实停止、过期版本 409、启动和健康恢复。Temporal 条目同时管理 worker，停止期间 Octop 控制面持续可用。
 - 整栈联调发现并修复 Temporal 连接检查误报：后台应接受所配置队列上的远端 worker，worker 自身健康检查仍须匹配本容器身份。浏览器确认容器生产登录页、离线工作台及七组件入口可渲染；认证后的后台生命周期使用上述真实 HTTP 验收。
 
+## 主项目组件互调与源码联调验收（2026-10-21）
+
+按 main 稳定线同步 upstream：已执行 fetch 和 merge，`upstream/main` 最新为 `dd9dce47`，本地 main 与 `dev-musae` 已包含该提交。功能改动仅在 `dev-musae`；未合入 upstream/develop。工作流操作及输入引用合同见 [组件工作流](component-workflows.md)。
+
+- 最终源码完整 `make all` 通过：**5179 passed、227 skipped、17 warnings**，耗时 575.00 秒；格式检查、Ruff 和 **618 个源文件**的 mypy 均通过。warning 为既有第三方依赖弃用提示。组件节点专项 65 passed、1 skipped；输入引用与运行器回归 38 passed；统一 Compose 专项 22 passed。Windows 跳过的目录符号链接项仍需在支持的平台运行。
+- 主项目提供 13 项注册组件操作，工作台支持组件节点、离线操作目录及成功前驱的 JSON Pointer 引用。本机与 Temporal 运行同一套分发代码；服务端冻结项目绑定版本和调用目标摘要，执行前后再次校验授权。Semantica 索引使用 R1 精确审批；输入预算在复制前累计，重复引用也受 128 KiB 聚合上限约束。
+- 最终容器源码的真实跨组件冒烟 **106 项通过**。独立调试租户下，本机和 Temporal 各完成七节点 DAG，覆盖 BeatDesign canvas、RNA genes/observability、CommerceAgentBench report、Hindsight recall、结果传递和 Semantica index。Hindsight 服务端审计中的完整 query 均匹配 BeatDesign 实际 MCP 输出；两条任务的模型 token 均为 0，业务结果保持 inconclusive。
+- 两条任务的 R1 索引均先实际等待，再通过主 API 携带当前 revision、node_id 和 plan_digest 精确审批；分别核对 25/26 条事件的完整哈希链，并从真实 Semantica SQLite 回读 21/22 条已索引证据。未绑定项目、伪造 snapshot、降低索引风险、缺少 consent、绑定版本变化和调用目标变化均被拒绝，临时连接配置已恢复。
+- RNA 使用上游 demo/manual 项目，关闭 initiative/evolution；Bench 使用独立私有目录的 synthetic-debug fixture，保持 unverified、无评分。上述结果验证真实服务接线和数据传递，未调用付费模型、未运行真实基准，也不代表进化行为已发布。
+- 根 Compose 完整重建并通过 `--wait`，九个常驻服务均为 healthy，初始化器正常退出。真实运行 `watch --no-up --prune=false`，确认唯一 Python 探针的新增和删除均同步到 Octop/worker，两者自动重启并可导入新增源码；探针和本次 watch 进程已移除，后台容器保留运行。8088/8099 原服务保持可用。
+- 前端定向 **17 项 Vitest**、TypeScript 与所改文件 ESLint 通过；浏览器实际验证容器工作台的组件类型、操作目录、Semantica index 默认输入及锁定的 R1 风险。使用独立只读预览核对 `/api/docs` 的新接口摘要、认证要求和具名响应结构；预览进程已停止，容器默认仍关闭 API 文档。
+- 全量检查中发现原 CLI 懒加载测试删除模块缓存后污染后续测试；将该验证隔离到独立 Python 子进程，原复现顺序 3 项及两个测试文件组合 50 项均通过，生产 CLI 代码无需修改。
+
 ## 仍需独立验收
 
 真实模型、CommerceAgentBench 付费完整运行、生产 Temporal 集群仍需独立验收。RNA 上游前端锁文件的依赖审计仍报告 1 项 high，本轮保留上游锁文件，尚未完成该依赖升级验证。
 
-当前 agent 执行使用冻结技能与模型进行无工具分析。R1/R2 具体业务写入适配器、实际候选发布器、Shadow/Canary 运行、经营收益归因、WORM/外部时间戳、灾难恢复仍需逐项完成；候选状态迁移不等同于已部署新行为。组件接线与配置详见 [BM 平台说明](bm-platform.md) 和 [开发部署说明](../docker/README.longterm.md)。
+当前 agent 执行使用冻结技能与模型进行无工具分析，可消费已授权组件节点的结果。除已接入的 Semantica R1 索引以外，R1/R2 具体业务写入适配器、实际候选发布器、Shadow/Canary 运行、经营收益归因、WORM/外部时间戳、灾难恢复仍需逐项完成；候选状态迁移不等同于已部署新行为。组件接线与配置详见 [BM 平台说明](bm-platform.md) 和 [开发部署说明](../docker/README.longterm.md)。

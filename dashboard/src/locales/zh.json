@@ -7056,6 +7056,18 @@
     "agentRequired": "请填写智能体 ID。",
     "skill": "技能引用",
     "skillHint": "可选；填写运行时已安装的技能名称。",
+    "nodeKind": "步骤类型",
+    "nodeKinds": {
+      "agent": "智能体与技能",
+      "local": "本机检查（local.echo）",
+      "component": "组件调用"
+    },
+    "nodeComponent": "调用组件",
+    "nodeOperation": "组件操作",
+    "componentSkillHint": "请将步骤类型设为“组件调用”，再选择组件和操作。",
+    "componentNodeHint": "组件步骤无需智能体 ID，风险由操作确定。离线时可使用内置目录编辑，执行时由服务端校验组件配置。",
+    "componentProjectRequired": "执行前请在组件管理中绑定当前租户的项目。",
+    "dependencyInputHint": "可引用已列入前置步骤的成功结果，例如 {\"query\":{\"$node\":\"seed\",\"pointer\":\"/result/output/query\"}}。pointer 为 JSON Pointer；省略时引用整个结果（含 status 和 result）。",
     "dependencies": "前置步骤",
     "risk": "风险等级",
     "riskHint": "R1 / R2 必须审批具体步骤与计划摘要，R3 禁止执行。",
@@ -7144,7 +7156,9 @@
       "duplicate": "步骤 ID 必须唯一且不能为空。",
       "cycle": "工作流包含循环依赖，请修改前置步骤。",
       "dependency": "工作流引用了不存在的前置步骤。",
-      "agent": "每个智能体执行步骤均需指定智能体 ID（local.echo 除外）。",
+      "agent": "每个智能体执行步骤均需指定智能体 ID；本机检查和组件调用可留空。",
+      "component": "请指定有效的组件及操作，并使用该操作的风险等级；Semantica 索引需 consent 为 true。",
+      "reference": "结果引用必须使用合法 JSON Pointer，并且只能引用已列入前置步骤的节点。",
       "forbidden": "R3 步骤禁止执行，请移除或重新评估风险。"
     },
     "statuses": {

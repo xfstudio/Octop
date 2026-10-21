@@ -21,6 +21,7 @@ from .execution import (
     ready_batch,
     token_reservation,
 )
+from .input_bindings import InputBindingError, resolve_input_bindings
 
 JsonObject = dict[str, Any]
 NodeExecutor = Callable[[JsonObject, JsonObject], Awaitable[JsonObject]]
@@ -232,8 +233,26 @@ class LongTermRuntime:
         state["decision"] = "continue"
         if any(node["risk"] != "R0" for node in batch) and self.evidence_writer is None:
             return self._terminal("failed", state, reason="durable_evidence_writer_required")
+        # Resolve only completed dependencies, keeping the frozen plan unchanged.
+        # Do this before any intent or dispatch, including token reservations.
+        try:
+            dispatch_nodes = {
+                node["id"]: {
+                    **node,
+                    "input": resolve_input_bindings(
+                        node.get("input", {}),
+                        {key: state["node_results"][key] for key in node["depends_on"]},
+                    ),
+                }
+                for node in batch
+            }
+        except InputBindingError:
+            state.update(execution_health="failed", decision="stopped")
+            return self._terminal("failed", state, reason="node_input_reference_invalid")
         reservations = {
-            node["id"]: token_reservation(node, task, state["node_results"], state)
+            node["id"]: token_reservation(
+                dispatch_nodes[node["id"]], task, state["node_results"], state
+            )
             for node in batch
         }
         if (
@@ -288,6 +307,7 @@ class LongTermRuntime:
             if remaining <= 0:
                 raise DispatchBlocked("failed")
             async with asyncio.timeout(min(node["timeout_seconds"], remaining)):
+                node = dispatch_nodes[node["id"]]
                 if node.get("skill") == "local.echo":
                     return {
                         "output": copy.deepcopy(node.get("input", {})),

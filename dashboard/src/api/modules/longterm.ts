@@ -4,6 +4,8 @@ export interface WorkflowNode {
   id: string;
   agent_id?: string;
   skill?: string;
+  component_id?: string;
+  operation?: string;
   depends_on: string[];
   risk: "R0" | "R1" | "R2" | "R3";
   input: Record<string, unknown>;
@@ -92,6 +94,14 @@ export interface IntegrationStatus {
   detail: string;
 }
 
+export interface ComponentOperationDefinition {
+  component_id: string;
+  operation: string;
+  risk: WorkflowNode["risk"];
+  input_example: Record<string, unknown>;
+  project_required: boolean;
+}
+
 export type TaskCommand = "start" | "pause" | "resume" | "cancel" | "approve";
 export type TaskOperation = "evaluate" | "evolution" | "memory" | "provenance";
 const base = "/longterm";
@@ -103,6 +113,10 @@ const spacePath = (tenantId: string, spaceId: string) =>
   `${tenantPath(tenantId)}/spaces/${encodeURIComponent(spaceId)}/config`;
 
 export const longtermApi = {
+  componentOperations: () =>
+    request<{ operations: ComponentOperationDefinition[] }>(
+      `${base}/component-operations`,
+    ),
   tenants: () => request<{ tenants: Tenant[] }>(`${base}/tenants`),
   createTenant: (name: string) =>
     request<Tenant>(`${base}/tenants`, {

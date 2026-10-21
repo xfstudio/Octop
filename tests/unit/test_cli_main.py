@@ -176,21 +176,28 @@ def test_user_list_json_emits_dump(monkeypatch) -> None:
 
 def test_root_help_does_not_import_subcommand_modules() -> None:
     """`octop --help` must not import individual command modules eagerly."""
-    import importlib
+    import subprocess
     import sys
 
-    for mod in list(sys.modules):
-        if mod.startswith("octop.cli.commands."):
-            del sys.modules[mod]
-    importlib.invalidate_caches()
-    # Force re-import of main itself so the lazy group is fresh.
-    if "octop.cli.main" in sys.modules:
-        del sys.modules["octop.cli.main"]
-    from octop.cli.main import cli as fresh_cli
-
-    runner = CliRunner()
-    result = runner.invoke(fresh_cli, ["--help"])
-    assert result.exit_code == 0
-
-    leaked = [m for m in sys.modules if m.startswith("octop.cli.commands.")]
-    assert leaked == [], f"Lazy loader leaked imports: {leaked}"
+    # A fresh interpreter observes eager imports without invalidating modules
+    # still referenced by other tests or by the parent commands package.
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from click.testing import CliRunner\n"
+            "from octop.cli.main import cli\n"
+            "import sys\n"
+            "result = CliRunner().invoke(cli, ['--help'])\n"
+            "assert result.exit_code == 0, result.output\n"
+            "leaked = [m for m in sys.modules if m.startswith('octop.cli.commands.')]\n"
+            "assert leaked == [], f'Lazy loader leaked imports: {leaked}'\n",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

@@ -148,6 +148,63 @@ async def test_real_jwt_middleware_rejects_missing_or_invalid_credentials(
     assert authenticated.json() == {"tenants": []}
 
 
+async def test_component_operation_catalog_is_authenticated_and_has_typed_schemas(
+    http_plane: HttpControlPlane,
+) -> None:
+    path = f"{_BASE}/component-operations"
+    assert (await http_plane.client.get(path)).status_code == 401
+    response = await http_plane.client.get(path, headers=http_plane.owner_auth)
+    assert response.status_code == 200
+    operations = response.json()["operations"]
+    assert {row["component_id"] for row in operations} == {
+        "beatdesign",
+        "rna",
+        "hindsight",
+        "commerceagentbench",
+        "semantica",
+    }
+    assert all(
+        row["risk"] == ("R1" if row["component_id"] == "semantica" else "R0") for row in operations
+    )
+    assert all(
+        set(row) == {"component_id", "operation", "risk", "input_example", "project_required"}
+        for row in operations
+    )
+    schema = (
+        await http_plane.client.get("/api/openapi.json", headers=http_plane.owner_auth)
+    ).json()
+    operation = schema["paths"][path]["get"]
+    assert operation["summary"]
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "ComponentOperationsResponse"
+    )
+
+
+async def test_http_component_node_freezes_server_snapshot_without_an_agent(
+    http_plane: HttpControlPlane,
+) -> None:
+    tenant_id, space_id = await _space(http_plane)
+    node = {
+        "id": "memory",
+        "skill": "component.call",
+        "component_id": "hindsight",
+        "operation": "recall",
+        "risk": "R0",
+        "input": {"query": "verified memory"},
+    }
+    body = {"space_id": space_id, "goal": "Read qualified memory", "workflow": {"nodes": [node]}}
+    endpoint = f"{_BASE}/tenants/{tenant_id}/tasks"
+    created = await http_plane.client.post(endpoint, headers=http_plane.owner_auth, json=body)
+    assert created.status_code == 201, created.text
+    frozen = created.json()["workflow"]["nodes"][0]
+    assert frozen["component_snapshot"]["component_id"] == "hindsight"
+    assert frozen["component_snapshot"]["operation"] == "recall"
+    assert not frozen.get("agent_id")
+    node["component_snapshot"] = frozen["component_snapshot"]
+    forged = await http_plane.client.post(endpoint, headers=http_plane.owner_auth, json=body)
+    assert forged.status_code == 422, forged.text
+
+
 async def test_http_empty_draft_sync_uses_revision_conflicts(http_plane: HttpControlPlane) -> None:
     tenant_id, space_id = await _space(http_plane)
     url = f"{_BASE}/tenants/{tenant_id}/spaces/{space_id}/config"

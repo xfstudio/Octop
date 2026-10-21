@@ -243,7 +243,7 @@ class LongtermService:
             if not isinstance(node, dict):
                 raise _invalid("workflow_node_invalid")
             skill = str(node.get("skill") or "agent.analyze")
-            if skill in {"local.echo", "agent.analyze"}:
+            if skill in {"local.echo", "agent.analyze", "component.call"}:
                 continue
             agent_id = str(node.get("agent_id") or "")
             row = self.services.agent_repo.get(agent_id)
@@ -306,6 +306,11 @@ class LongtermService:
         plan = compile_workflow(task)
         # No arbitrary harness tool call is admitted as a read-only node.
         for node in plan["nodes"]:
+            if node.get("skill") == "component.call":
+                from octop.infra.longterm.component_calls import freeze_component_call
+
+                node["component_snapshot"] = freeze_component_call(self, tenant_id, user, node)
+                continue
             agent_id = node.get("agent_id")
             if agent_id:
                 row = self.services.agent_repo.get(str(agent_id))
@@ -633,7 +638,11 @@ class LongtermService:
             self.repo.release(tenant_id, task_id, owner)
 
     async def _execute_node(self, node: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
-        """Tool-free agent analysis; no user label can enable an unrestricted harness."""
+        """Dispatch registered component operations or tool-free agent analysis."""
+        if node.get("skill") == "component.call":
+            from octop.infra.longterm.component_calls import execute_component_call
+
+            return await execute_component_call(self, node, task)
         if node["risk"] != "R0":
             raise _invalid("effect_adapter_not_registered")
         agent_id = str(node.get("agent_id") or "")

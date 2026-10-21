@@ -73,3 +73,29 @@ docker compose restart octop worker
 ```
 
 服务异常时先看对应日志和健康状态。不要通过删除卷修复数据库或凭据冲突。各组件服务在容器网络内使用固定 DNS 名，宿主端口变化不会改变 Octop 的内部集成地址。
+
+## 统一启动联调
+
+主项目内的组件操作节点、跨节点输入引用及审批方式见 [组件工作流](../docs/component-workflows.md)。这些节点使用同一租户控制面，支持本机及 Temporal 运行，不需要从浏览器直接请求组件私有接口。
+
+在仓库根目录运行同一个 Compose 文件的 watch 模式：
+
+```sh
+docker compose up --build --watch
+```
+
+此命令先构建当前源码并启动整栈，然后在前台监视变更。不要同时传 `-d`；退出前台命令会停止本次启动的服务，数据卷保留。已有后台栈需要继续运行时，可另开终端运行 `docker compose watch --no-up --prune=false`；此方式保留重建前的旧镜像，也不会先构建，请先用 `docker compose up -d --build` 确保镜像与当前源码一致。所有命令使用相同的 `.env`、项目名和端口设置。使用 `BEATDESIGN_SOURCE` 等变量时，watch 要求它们指向本机源码目录。
+
+| 修改位置 | 自动生效方式 |
+| --- | --- |
+| Octop `src/octop`（不含已构建 dashboard） | 同步到 Octop 和 worker 的 editable Python 安装，再重启两者 |
+| RNA `packages/sdk/src`、`packages/sdk/skills` | 同步到 Octop 和 worker 的内嵌 SDK 并重启；重建 RNA 服务 |
+| Semantica `semantica`（不含生成的 static） | 同步到 Octop 和 worker 的内嵌 SDK 并重启；重建 Explorer 服务 |
+| Octop `dashboard`、`pyproject.toml`、`uv.lock` 或 RNA SDK `package.json` | 重建 Octop 和 worker，前端重新生产打包、依赖重新按锁文件安装 |
+| BeatDesign、RNA 控制中心、Semantica Explorer、CommerceAgentBench 源码和依赖 | 通过对应 named context 重建组件，保持其原生构建流程 |
+| 各组件 Dockerfile、认证启动器及构建助手 | 重建使用该文件的服务 |
+| Hindsight Dockerfile 或认证启动器 | 重建基于固定官方镜像的 Hindsight 服务 |
+
+Octop/worker 的源码路径分别为 `/app/src/octop`、`/opt/rna/packages/sdk`、`/opt/semantica/semantica`，同步目标不覆盖持久卷或凭据卷。watch 排除 `.git`、`.env*`、依赖目录、编译缓存、构建产物和本地运行状态。修改源码会重启服务，请避免在不可中断的手工调试请求中途保存；Temporal 仍按任务自身的重试和持久化策略恢复。
+
+本模式使用容器重启和真实生产构建联调，不启动额外 Vite 服务，也不开放调试器端口。Hindsight 和 Temporal 使用已固定的上游镜像；这里没有挂载本机 Hindsight/Temporal 服务端源码，不提供它们的源码热重载。模型配置、密钥和评测任务仍在工作台或相应原生入口显式配置、执行。修改 Compose、`.env`、初始化器或 PostgreSQL 初始化脚本后，重新执行 `docker compose up --build --watch`；数据库初始化脚本只在空数据库首次初始化时运行，已有数据库变更应使用迁移。

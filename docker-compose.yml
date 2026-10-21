@@ -2,6 +2,88 @@
 # Source checkouts default to the existing sibling projects; see docker/README.stack.md.
 name: ${COMPOSE_PROJECT_NAME:-musae}
 
+# Watch paths are relative to this file, including the sibling named contexts.
+# Keep generated output, local credentials and runtime state out of live sync.
+x-watch-source: &watch-source
+  ignore:
+    - '**/.git/'
+    - '**/.env'
+    - '**/.env.*'
+    - '**/node_modules/'
+    - '**/.venv*/'
+    - '**/venv/'
+    - '**/__pycache__/'
+    - '**/*.py[cod]'
+    - '**/.pytest_cache/'
+    - '**/.mypy_cache/'
+    - '**/.ruff_cache/'
+    - '**/.state/'
+    - '**/.octop/'
+    - '**/.output/'
+    - '**/.nitro/'
+    - '**/.tanstack/'
+    - '**/*.tsbuildinfo'
+    - '**/dist/'
+    - '**/build/'
+    - dashboard/
+    - static/
+    - semantica/static/
+    - .claude/
+    - .agents/
+    - .codex/
+    - .cursor/
+    - .idea/
+    - .vscode/
+    - data/
+    - logs/
+    - runs/
+    - results/
+    - reports/
+    - login-state/
+    - coverage/
+    - htmlcov/
+    - test-results/
+    - playwright-report/
+
+x-octop-develop: &octop-develop
+  watch:
+    # The editable Python install and embedded SDKs are writable by the stack
+    # runtime user. Restart both consumers so imports/activities use new code.
+    - <<: *watch-source
+      action: sync+restart
+      path: ./src/octop
+      target: /app/src/octop
+    - <<: *watch-source
+      action: sync+restart
+      path: ${RNA_SOURCE:-../rna_dev}/packages/sdk/src
+      target: /opt/rna/packages/sdk/src
+    - <<: *watch-source
+      action: sync+restart
+      path: ${RNA_SOURCE:-../rna_dev}/packages/sdk/skills
+      target: /opt/rna/packages/sdk/skills
+    - <<: *watch-source
+      action: sync+restart
+      path: ${SEMANTICA_SOURCE:-../semantica}/semantica
+      target: /opt/semantica/semantica
+    # Frontends and dependencies must pass through their real build stages.
+    - <<: *watch-source
+      action: rebuild
+      path: ./dashboard
+    - action: rebuild
+      path: ./pyproject.toml
+    - action: rebuild
+      path: ./uv.lock
+    - action: rebuild
+      path: ${RNA_SOURCE:-../rna_dev}/packages/sdk/package.json
+    - action: rebuild
+      path: ./docker/Dockerfile
+    - action: rebuild
+      path: ./docker/docker-entrypoint.sh
+    - action: rebuild
+      path: ./docker/stack/stack_bootstrap.py
+    - action: rebuild
+      path: ./docker/stack/install_debian_packages.py
+
 x-octop-build: &octop-build
   context: .
   dockerfile: docker/Dockerfile
@@ -82,6 +164,7 @@ services:
   octop:
     image: musae-octop:dev
     build: *octop-build
+    develop: *octop-develop
     init: true
     restart: unless-stopped
     environment:
@@ -136,6 +219,7 @@ services:
   worker:
     image: musae-octop:dev
     build: *octop-build
+    develop: *octop-develop
     init: true
     restart: unless-stopped
     command: [worker]
@@ -166,6 +250,19 @@ services:
       dockerfile: docker/stack/Dockerfile.beatdesign
       additional_contexts:
         beatdesign_src: ${BEATDESIGN_SOURCE:-../BeatDesign}
+    develop:
+      watch:
+        - <<: *watch-source
+          action: rebuild
+          path: ${BEATDESIGN_SOURCE:-../BeatDesign}
+        - action: rebuild
+          path: ./docker/stack/Dockerfile.beatdesign
+        - action: rebuild
+          path: ./docker/stack/beatdesign-entry.mjs
+        - action: rebuild
+          path: ./docker/stack/beatdesign-loopback-proxy.mjs
+        - action: rebuild
+          path: ./docker/stack/install-debian-packages.mjs
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
@@ -188,6 +285,22 @@ services:
       dockerfile: docker/stack/Dockerfile.rna
       additional_contexts:
         rna_src: ${RNA_SOURCE:-../rna_dev}
+    develop:
+      watch:
+        - <<: *watch-source
+          action: rebuild
+          path: ${RNA_SOURCE:-../rna_dev}/prototypes/control-center
+        - <<: *watch-source
+          action: rebuild
+          path: ${RNA_SOURCE:-../rna_dev}/packages/sdk
+        - action: rebuild
+          path: ./docker/stack/Dockerfile.rna
+        - action: rebuild
+          path: ./docker/stack/rna-entry.mjs
+        - action: rebuild
+          path: ./docker/stack/beatdesign-loopback-proxy.mjs
+        - action: rebuild
+          path: ./docker/stack/install-debian-packages.mjs
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
@@ -209,6 +322,15 @@ services:
       dockerfile: docker/stack/Dockerfile.semantica
       additional_contexts:
         semantica_src: ${SEMANTICA_SOURCE:-../semantica}
+    develop:
+      watch:
+        - <<: *watch-source
+          action: rebuild
+          path: ${SEMANTICA_SOURCE:-../semantica}
+        - action: rebuild
+          path: ./docker/stack/Dockerfile.semantica
+        - action: rebuild
+          path: ./docker/stack/semantica_entrypoint.py
     init: true
     restart: unless-stopped
     environment:
@@ -228,6 +350,12 @@ services:
     build:
       context: .
       dockerfile: docker/stack/Dockerfile.hindsight
+    develop:
+      watch:
+        - action: rebuild
+          path: ./docker/stack/Dockerfile.hindsight
+        - action: rebuild
+          path: ./docker/stack/hindsight_entrypoint.py
     init: true
     restart: unless-stopped
     stop_grace_period: 45s
@@ -251,6 +379,15 @@ services:
       dockerfile: docker/stack/Dockerfile.benchmark
       additional_contexts:
         benchmark_src: ${BENCHMARK_SOURCE:-../CommerceAgentBench}
+    develop:
+      watch:
+        - <<: *watch-source
+          action: rebuild
+          path: ${BENCHMARK_SOURCE:-../CommerceAgentBench}
+        - action: rebuild
+          path: ./docker/stack/Dockerfile.benchmark
+        - action: rebuild
+          path: ./docker/stack/benchmark_server.py
     init: true
     restart: unless-stopped
     ports:

@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { longtermApi, type LongtermTask } from "../../api/modules/longterm";
 import {
   LOCAL_WORKSPACES_KEY,
+  DEFAULT_COMPONENT_OPERATIONS,
   createLocalWorkspaceState,
   newLocalWorkspace,
 } from "./localWorkspace";
@@ -40,6 +41,7 @@ vi.mock("../../api/modules/longterm", () => ({
   longtermApi: {
     tenants: vi.fn(),
     integrations: vi.fn(),
+    componentOperations: vi.fn(),
     spaces: vi.fn(),
     tasks: vi.fn(),
     uploadConfiguration: vi.fn(),
@@ -65,6 +67,9 @@ describe("offline workbench and revision-safe sync", () => {
     });
     vi.mocked(longtermApi.tasks).mockResolvedValue({ tasks: [] });
     vi.mocked(longtermApi.integrations).mockResolvedValue({ integrations: [] });
+    vi.mocked(longtermApi.componentOperations).mockResolvedValue({
+      operations: DEFAULT_COMPONENT_OPERATIONS,
+    });
   });
 
   it("edits and persists device configuration without calling any server APIs", async () => {
@@ -306,5 +311,166 @@ describe("offline workbench and revision-safe sync", () => {
     ).toBe("card-a");
     expect(stored.workspaces[0].config.defaults.max_cycles).toBe(3);
     expect(longtermApi.importBeatDesign).not.toHaveBeenCalled();
+  });
+
+  it("adds a component call offline with an operation example and fixed risk without an agent ID", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <LongtermPage standalone />
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole("button", { name: "longterm.addNode" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await user.click(
+      dialog.getByRole("combobox", { name: "longterm.nodeKind" }),
+    );
+    await user.click(await screen.findByText("longterm.nodeKinds.component"));
+    expect(
+      dialog.queryByRole("textbox", { name: "longterm.agent" }),
+    ).toBeNull();
+    await user.click(
+      dialog.getByRole("combobox", { name: "longterm.nodeComponent" }),
+    );
+    await user.click(await screen.findByText("Semantica"));
+    expect(
+      dialog.getByRole("textbox", { name: "longterm.inputJson" }),
+    ).toHaveValue(JSON.stringify({ consent: true }, null, 2));
+    expect(
+      dialog.getByRole("combobox", { name: "longterm.risk" }),
+    ).toBeDisabled();
+    await user.click(dialog.getByRole("button", { name: "OK" }));
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem(LOCAL_WORKSPACES_KEY)!);
+      expect(stored.workspaces[0].config.workflow.nodes).toEqual([
+        expect.objectContaining({
+          skill: "component.call",
+          component_id: "semantica",
+          operation: "index",
+          risk: "R1",
+          input: { consent: true },
+        }),
+      ]);
+      expect(stored.workspaces[0].config.workflow.nodes[0]).not.toHaveProperty(
+        "agent_id",
+      );
+    });
+    expect(screen.getByText("semantica / index")).toBeInTheDocument();
+    expect(longtermApi.componentOperations).not.toHaveBeenCalled();
+  });
+
+  it("keeps component editing available when the authenticated operation catalog is unavailable", async () => {
+    mocks.user = { id: 1 };
+    vi.mocked(longtermApi.componentOperations).mockRejectedValue(
+      new Error("Network unavailable"),
+    );
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <LongtermPage standalone />
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(longtermApi.componentOperations).toHaveBeenCalled(),
+    );
+    await user.click(screen.getByRole("button", { name: "longterm.addNode" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await user.click(
+      dialog.getByRole("combobox", { name: "longterm.nodeKind" }),
+    );
+    await user.click(await screen.findByText("longterm.nodeKinds.component"));
+    expect(
+      dialog.getByRole("combobox", { name: "longterm.nodeOperation" }),
+    ).toHaveValue("");
+    expect(dialog.getByText("project")).toBeInTheDocument();
+    expect(
+      dialog.getByText(/longterm.componentProjectRequired/),
+    ).toBeInTheDocument();
+    expect(
+      dialog.getByRole("combobox", { name: "longterm.dependencies" }),
+    ).not.toBeDisabled();
+  });
+
+  it("uses the authenticated operation catalog for component input templates", async () => {
+    mocks.user = { id: 1 };
+    vi.mocked(longtermApi.componentOperations).mockResolvedValue({
+      operations: [
+        {
+          component_id: "hindsight",
+          operation: "recall",
+          risk: "R0",
+          input_example: { query: "Server-provided example", max_tokens: 512 },
+          project_required: false,
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <LongtermPage standalone />
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(longtermApi.componentOperations).toHaveBeenCalled(),
+    );
+    await user.click(screen.getByRole("button", { name: "longterm.addNode" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await user.click(
+      dialog.getByRole("combobox", { name: "longterm.nodeKind" }),
+    );
+    await user.click(await screen.findByText("longterm.nodeKinds.component"));
+    expect(
+      dialog.getByRole("textbox", { name: "longterm.inputJson" }),
+    ).toHaveValue(
+      JSON.stringify(
+        { query: "Server-provided example", max_tokens: 512 },
+        null,
+        2,
+      ),
+    );
+    expect(dialog.getByText("recall")).toBeInTheDocument();
+    expect(dialog.queryByText(/longterm.componentProjectRequired/)).toBeNull();
+  });
+
+  it("removes component fields and server snapshots when changing a component step to a local check", async () => {
+    const state = createLocalWorkspaceState("Component conversion");
+    state.workspaces[0].config.workflow.nodes = [
+      {
+        id: "read-project",
+        skill: "component.call",
+        component_id: "beatdesign",
+        operation: "project",
+        risk: "R0",
+        depends_on: [],
+        input: {},
+      },
+    ];
+    Object.assign(state.workspaces[0].config.workflow.nodes[0], {
+      component_snapshot: { server_owned: "frozen" },
+    });
+    localStorage.setItem(LOCAL_WORKSPACES_KEY, JSON.stringify(state));
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <LongtermPage standalone />
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole("button", { name: "longterm.edit" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await user.click(
+      dialog.getByRole("combobox", { name: "longterm.nodeKind" }),
+    );
+    await user.click(await screen.findByText("longterm.nodeKinds.local"));
+    await user.click(dialog.getByRole("button", { name: "OK" }));
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem(LOCAL_WORKSPACES_KEY)!);
+      expect(stored.workspaces[0].config.workflow.nodes[0]).toEqual({
+        id: "read-project",
+        skill: "local.echo",
+        risk: "R0",
+        depends_on: [],
+        input: {},
+      });
+    });
   });
 });

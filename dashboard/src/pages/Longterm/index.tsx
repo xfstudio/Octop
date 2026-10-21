@@ -44,6 +44,7 @@ import { apiErrorMessage } from "../../utils/apiError";
 import { message } from "../../utils/antdMessage";
 import {
   longtermApi,
+  type ComponentOperationDefinition,
   type IntegrationStatus,
   type LongtermTask,
   type TaskCommand,
@@ -59,6 +60,7 @@ import {
 import {
   createLocalWorkspaceState,
   credentialPaths,
+  DEFAULT_COMPONENT_OPERATIONS,
   isWorkspaceConfig,
   localIdentifier,
   LOCAL_WORKSPACES_KEY,
@@ -95,8 +97,11 @@ const statusColor = (status: string) =>
 
 interface NodeForm {
   id: string;
-  agent_id: string;
+  node_kind: "agent" | "local" | "component";
+  agent_id?: string;
   skill?: string;
+  component_id?: string;
+  operation?: string;
   depends_on: string[];
   risk: WorkflowNode["risk"];
   input_json: string;
@@ -165,6 +170,9 @@ export default function LongtermPage({
   const [spaceId, setSpaceId] = useState("");
   const [tasks, setTasks] = useState<LongtermTask[]>([]);
   const [integrations, setIntegrations] = useState<IntegrationStatus[]>([]);
+  const [componentOperations, setComponentOperations] = useState<
+    ComponentOperationDefinition[]
+  >(DEFAULT_COMPONENT_OPERATIONS);
   const [detail, setDetail] = useState<LongtermTask | null>(null);
   const [evidence, setEvidence] = useState<TaskEvidence | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -175,6 +183,13 @@ export default function LongtermPage({
   const [newName, setNewName] = useState("");
   const [nodeDialog, setNodeDialog] = useState<{ index: number } | null>(null);
   const [nodeForm] = Form.useForm<NodeForm>();
+  const nodeKind = Form.useWatch("node_kind", nodeForm);
+  const nodeComponent = Form.useWatch("component_id", nodeForm);
+  const nodeOperation = Form.useWatch("operation", nodeForm);
+  const selectedComponentOperation = componentOperations.find(
+    (item) =>
+      item.component_id === nodeComponent && item.operation === nodeOperation,
+  );
   const [goal, setGoal] = useState("");
   const [beatdesignOpen, setBeatdesignOpen] = useState(false);
   const [beatdesignInput, setBeatdesignInput] = useState("");
@@ -258,7 +273,8 @@ export default function LongtermPage({
     void Promise.allSettled([
       longtermApi.tenants(),
       longtermApi.integrations(),
-    ]).then(([tenantResult, integrationResult]) => {
+      longtermApi.componentOperations(),
+    ]).then(([tenantResult, integrationResult, operationsResult]) => {
       if (cancelled) return;
       if (tenantResult.status === "fulfilled")
         setTenants(tenantResult.value.tenants);
@@ -276,6 +292,11 @@ export default function LongtermPage({
             t,
           ),
         );
+      if (
+        operationsResult.status === "fulfilled" &&
+        operationsResult.value.operations.length
+      )
+        setComponentOperations(operationsResult.value.operations);
     });
     return () => {
       cancelled = true;
@@ -470,10 +491,17 @@ export default function LongtermPage({
 
   function editNode(index: number) {
     const node = config.workflow.nodes[index];
+    nodeForm.resetFields();
     nodeForm.setFieldsValue(
       node
         ? {
             ...node,
+            node_kind:
+              node.skill === "component.call"
+                ? "component"
+                : node.skill === "local.echo"
+                ? "local"
+                : "agent",
             agent_id: node.agent_id ?? "",
             input_json: json(node.input),
           }
@@ -482,6 +510,7 @@ export default function LongtermPage({
               36,
             )}`,
             agent_id: "",
+            node_kind: "agent",
             skill: "",
             risk: "R0",
             depends_on: [],
@@ -491,21 +520,53 @@ export default function LongtermPage({
     setNodeDialog({ index });
   }
 
+  function selectComponentOperation(componentId: string, operation?: string) {
+    const entry = componentOperations.find(
+      (item) =>
+        item.component_id === componentId &&
+        (operation === undefined || item.operation === operation),
+    );
+    nodeForm.setFieldsValue({
+      component_id: componentId,
+      operation: entry?.operation,
+      risk: entry?.risk ?? "R0",
+      input_json: json(entry?.input_example ?? {}),
+    });
+  }
+
   async function saveNode() {
     const fields = await nodeForm.validateFields();
     if (!nodeDialog) return;
+    const previous = config.workflow.nodes[nodeDialog.index];
+    const skill =
+      fields.node_kind === "component"
+        ? "component.call"
+        : fields.node_kind === "local"
+        ? "local.echo"
+        : fields.skill?.trim();
     const node: WorkflowNode = {
-      ...config.workflow.nodes[nodeDialog.index],
       id: fields.id.trim(),
-      agent_id: fields.agent_id.trim(),
-      ...(fields.skill?.trim() ? { skill: fields.skill.trim() } : {}),
+      ...(fields.node_kind === "agent" && fields.agent_id?.trim()
+        ? { agent_id: fields.agent_id.trim() }
+        : {}),
+      ...(skill ? { skill } : {}),
+      ...(fields.node_kind === "component"
+        ? { component_id: fields.component_id, operation: fields.operation }
+        : {}),
       risk: fields.risk,
       depends_on: fields.depends_on,
       input: JSON.parse(fields.input_json) as Record<string, unknown>,
+      ...(previous?.beatdesign_card_id
+        ? { beatdesign_card_id: previous.beatdesign_card_id }
+        : {}),
+      ...(previous?.resources ? { resources: previous.resources } : {}),
+      ...(previous?.timeout_seconds !== undefined
+        ? { timeout_seconds: previous.timeout_seconds }
+        : {}),
     };
     const nodes = [...config.workflow.nodes];
     nodes[nodeDialog.index] = node;
-    const problem = workflowProblem(nodes);
+    const problem = workflowProblem(nodes, componentOperations);
     if (problem && !["agent", "forbidden"].includes(problem)) {
       message.error(t(`longterm.workflowErrors.${problem}`));
       return;
@@ -517,7 +578,10 @@ export default function LongtermPage({
   async function createTask() {
     await run(async () => {
       const portable = assertPortable();
-      const problem = workflowProblem(portable.workflow.nodes);
+      const problem = workflowProblem(
+        portable.workflow.nodes,
+        componentOperations,
+      );
       if (problem) throw new Error(t(`longterm.workflowErrors.${problem}`));
       const tenant = tenantId;
       const body = {
@@ -959,7 +1023,10 @@ export default function LongtermPage({
                     {
                       title: t("longterm.skill"),
                       dataIndex: "skill",
-                      render: (value: string) => value || "—",
+                      render: (value: string, node: WorkflowNode) =>
+                        value === "component.call"
+                          ? `${node.component_id} / ${node.operation}`
+                          : value || "—",
                     },
                     {
                       title: t("longterm.dependencies"),
@@ -1373,32 +1440,120 @@ export default function LongtermPage({
               }
             />
           </Form.Item>
-          <div className={styles.grid}>
-            <Form.Item
-              name="agent_id"
-              label={t("longterm.agent")}
-              dependencies={["skill"]}
-              rules={[
-                ({ getFieldValue }) => ({
-                  validator: (_, value: string | undefined) =>
-                    getFieldValue("skill")?.trim() === "local.echo" ||
-                    value?.trim()
-                      ? Promise.resolve()
-                      : Promise.reject(new Error(t("longterm.agentRequired"))),
-                }),
-              ]}
-              extra={t("longterm.agentHint")}
-            >
-              <Input />
-            </Form.Item>
-            <Form.Item
-              name="skill"
-              label={t("longterm.skill")}
-              extra={t("longterm.skillHint")}
-            >
-              <Input />
-            </Form.Item>
-          </div>
+          <Form.Item
+            name="node_kind"
+            label={t("longterm.nodeKind")}
+            rules={[{ required: true }]}
+          >
+            <Select
+              aria-label={t("longterm.nodeKind")}
+              options={["agent", "local", "component"].map((kind) => ({
+                value: kind,
+                label: t(`longterm.nodeKinds.${kind}`),
+              }))}
+              onChange={(kind: NodeForm["node_kind"]) => {
+                nodeForm.setFieldsValue({
+                  skill: kind === "local" ? "local.echo" : "",
+                  risk: "R0",
+                });
+                if (kind === "component")
+                  selectComponentOperation(componentOperations[0].component_id);
+              }}
+            />
+          </Form.Item>
+          {nodeKind === "agent" && (
+            <div className={styles.grid}>
+              <Form.Item
+                name="agent_id"
+                label={t("longterm.agent")}
+                dependencies={["skill"]}
+                rules={[
+                  ({ getFieldValue }) => ({
+                    validator: (_, value: string | undefined) =>
+                      getFieldValue("skill")?.trim() === "local.echo" ||
+                      value?.trim()
+                        ? Promise.resolve()
+                        : Promise.reject(
+                            new Error(t("longterm.agentRequired")),
+                          ),
+                  }),
+                ]}
+                extra={t("longterm.agentHint")}
+              >
+                <Input />
+              </Form.Item>
+              <Form.Item
+                name="skill"
+                label={t("longterm.skill")}
+                extra={t("longterm.skillHint")}
+                rules={[
+                  {
+                    validator: async (_, value?: string) => {
+                      if (value?.trim() === "component.call")
+                        throw new Error(t("longterm.componentSkillHint"));
+                    },
+                  },
+                ]}
+              >
+                <Input />
+              </Form.Item>
+            </div>
+          )}
+          {nodeKind === "component" && (
+            <>
+              <div className={styles.grid}>
+                <Form.Item
+                  name="component_id"
+                  label={t("longterm.nodeComponent")}
+                  rules={[{ required: true }]}
+                >
+                  <Select
+                    aria-label={t("longterm.nodeComponent")}
+                    options={Array.from(
+                      new Set(
+                        componentOperations.map((item) => item.component_id),
+                      ),
+                    ).map((id) => ({
+                      value: id,
+                      label:
+                        {
+                          beatdesign: "BeatDesign",
+                          rna: "RNA",
+                          hindsight: "Hindsight",
+                          commerceagentbench: "CommerceAgentBench",
+                          semantica: "Semantica",
+                        }[id] ?? id,
+                    }))}
+                    onChange={(id: string) => selectComponentOperation(id)}
+                  />
+                </Form.Item>
+                <Form.Item
+                  name="operation"
+                  label={t("longterm.nodeOperation")}
+                  rules={[{ required: true }]}
+                >
+                  <Select
+                    aria-label={t("longterm.nodeOperation")}
+                    options={componentOperations
+                      .filter((item) => item.component_id === nodeComponent)
+                      .map((item) => ({
+                        value: item.operation,
+                        label: item.operation,
+                      }))}
+                    onChange={(operation: string) => {
+                      if (nodeComponent)
+                        selectComponentOperation(nodeComponent, operation);
+                    }}
+                  />
+                </Form.Item>
+              </div>
+              <Paragraph type="secondary">
+                {t("longterm.componentNodeHint")}
+                {selectedComponentOperation?.project_required &&
+                  ` ${t("longterm.componentProjectRequired")}`}
+              </Paragraph>
+            </>
+          )}
           <Form.Item name="depends_on" label={t("longterm.dependencies")}>
             <Select
               mode="multiple"
@@ -1413,6 +1568,7 @@ export default function LongtermPage({
             extra={t("longterm.riskHint")}
           >
             <Select
+              disabled={nodeKind === "component"}
               options={["R0", "R1", "R2", "R3"].map((risk) => ({
                 value: risk,
                 label: t(`longterm.risks.${risk}`),
@@ -1422,6 +1578,7 @@ export default function LongtermPage({
           <Form.Item
             name="input_json"
             label={t("longterm.inputJson")}
+            extra={t("longterm.dependencyInputHint")}
             rules={[
               {
                 validator: async (_, value: string) => {

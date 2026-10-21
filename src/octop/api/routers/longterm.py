@@ -39,6 +39,18 @@ class IntegrationsResponse(ResourceResponse):
     integrations: list[IntegrationResponse]
 
 
+class ComponentOperationResponse(BaseModel):
+    component_id: str
+    operation: str
+    risk: Literal["R0", "R1"]
+    input_example: dict[str, Any]
+    project_required: bool
+
+
+class ComponentOperationsResponse(BaseModel):
+    operations: list[ComponentOperationResponse]
+
+
 class ComponentFieldResponse(BaseModel):
     key: str
     type: Literal["string", "boolean"]
@@ -338,6 +350,18 @@ def domain_errors() -> Iterator[None]:
         raise OctopError(
             ErrorCode.LONGTERM_INVALID, "invalid workflow", details={"reason": str(exc)}
         ) from exc
+
+
+@router.get(
+    "/component-operations",
+    response_model=ComponentOperationsResponse,
+    summary="List registered component workflow operations and input examples",
+    description="Operations use tenant-scoped adapters. Parameters and dependency links are frozen in each task plan.",
+)
+async def component_operations(user: User = Depends(current_user)) -> dict[str, Any]:
+    from octop.infra.longterm.component_calls import operation_catalog
+
+    return {"operations": operation_catalog()}
 
 
 @router.get(
