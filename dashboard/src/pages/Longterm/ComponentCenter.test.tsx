@@ -203,6 +203,34 @@ describe("component management center", () => {
     }
   });
 
+  it("opens a scoped operation session from each component without requiring server administration", async () => {
+    const user = userEvent.setup();
+    const onSession = vi.fn();
+    const parameters = props({
+      isAdmin: false,
+      tenantRole: "viewer",
+      onSession,
+    });
+    const rendered = render(view(parameters));
+    await screen.findByText("componentCenter.adminOnly");
+    for (const id of IDS) {
+      const entry = card(id).getByRole("button", {
+        name: "operationSessions.entry",
+      });
+      await waitFor(() => expect(entry).toBeEnabled());
+      await user.click(entry);
+      expect(onSession).toHaveBeenLastCalledWith({ component_id: id });
+    }
+    rendered.rerender(view({ ...parameters, connected: false }));
+    expect(
+      screen.getAllByRole("button", { name: "operationSessions.entry" }),
+    ).toHaveLength(7);
+    for (const entry of screen.getAllByRole("button", {
+      name: "operationSessions.entry",
+    }))
+      expect(entry).toBeDisabled();
+  });
+
   it("keeps all component descriptions and device editing available offline without server requests", async () => {
     const user = userEvent.setup();
     const parameters = props({ connected: false });

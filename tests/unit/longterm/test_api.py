@@ -18,6 +18,7 @@ from octop.api.deps import sign_token
 from octop.api.middleware import jwt_auth
 from octop.api.openapi_meta import configure_openapi
 from octop.api.routers.longterm import router
+from octop.api.routers.longterm_operations import router as operations_router
 from octop.api.routers.longterm_projects import router as projects_router
 from octop.config import OctopConfig
 from octop.infra.db.migrate import run_migrations
@@ -71,6 +72,7 @@ async def http_plane(
     _install_exception_handlers(app)
     app.include_router(router, prefix=_BASE, tags=["longterm"])
     app.include_router(projects_router, prefix=_BASE, tags=["longterm"])
+    app.include_router(operations_router, prefix=_BASE, tags=["longterm"])
     jwt_auth.install(app, server)
     configure_openapi(app)
     owner_auth = {
@@ -177,6 +179,129 @@ async def test_component_operation_catalog_is_authenticated_and_has_typed_schema
     assert operation["summary"]
     assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "ComponentOperationsResponse"
+    )
+
+
+async def test_operation_session_http_readback_acceptance_and_private_history(
+    http_plane: HttpControlPlane,
+) -> None:
+    plane = http_plane
+    tenant, space = await _space(plane)
+    task = await _echo_task(plane, tenant, space)
+    base = f"{_BASE}/tenants/{tenant}/spaces/{space}/operation-sessions"
+    catalog = await plane.client.get(
+        f"{_BASE}/operation-session-operations", headers=plane.owner_auth
+    )
+    assert catalog.status_code == 200
+    assert {o["component_id"] for o in catalog.json()["operations"]} == {
+        "octop",
+        "beatdesign",
+        "rna",
+        "hindsight",
+        "commerceagentbench",
+        "semantica",
+        "temporal",
+    }
+    payload = {
+        "component_id": "octop",
+        "operation": "task",
+        "task_id": task["task_id"],
+        "idempotency_key": "session-http-create",
+    }
+    created = await plane.client.post(base, headers=plane.owner_auth, json=payload)
+    assert created.status_code == 201, created.text
+    session = created.json()
+    replay = await plane.client.post(base, headers=plane.owner_auth, json=payload)
+    assert replay.json()["session_id"] == session["session_id"]
+    path = f"{base}/{session['session_id']}"
+    assert (await plane.client.get(path)).status_code == 401
+    assert (await plane.client.get(path, headers=plane.foreign_auth)).status_code == 403
+    ready = await plane.client.post(
+        path + "/readback",
+        headers=plane.owner_auth,
+        json={"expected_revision": session["revision"], "idempotency_key": "session-read"},
+    )
+    assert ready.status_code == 200, ready.text
+    candidate = ready.json()
+    assert candidate["candidate"]["verified"] is True
+    assert candidate["candidate"]["draft_only"] is True
+    wrong_digest = await plane.client.post(
+        path + "/commit",
+        headers=plane.owner_auth,
+        json={
+            "expected_revision": candidate["revision"],
+            "idempotency_key": "wrong-result",
+            "result_digest": "0" * 64,
+        },
+    )
+    assert wrong_digest.status_code == 409
+    command = {
+        "expected_revision": candidate["revision"],
+        "idempotency_key": "accept-result",
+        "result_digest": candidate["result_digest"],
+    }
+    accepted = await plane.client.post(path + "/commit", headers=plane.owner_auth, json=command)
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["status"] == "committed"
+    replay = await plane.client.post(path + "/commit", headers=plane.owner_auth, json=command)
+    assert replay.json()["revision"] == accepted.json()["revision"]
+    listed = await plane.client.get(base, headers=plane.owner_auth)
+    assert listed.json()["sessions"][0]["session_id"] == session["session_id"]
+    unchanged_response = await plane.client.get(
+        f"{_BASE}/tenants/{tenant}/tasks/{task['task_id']}", headers=plane.owner_auth
+    )
+    unchanged = unchanged_response.json()
+    assert unchanged["revision"] == task["revision"]
+    assert unchanged["workflow"] == task["workflow"]
+
+
+async def test_operation_session_http_manual_import_and_typed_contract(
+    http_plane: HttpControlPlane,
+) -> None:
+    plane = http_plane
+    tenant, space = await _space(plane)
+    task = await _echo_task(plane, tenant, space)
+    base = f"{_BASE}/tenants/{tenant}/spaces/{space}/operation-sessions"
+    created = await plane.client.post(
+        base,
+        headers=plane.owner_auth,
+        json={
+            "component_id": "octop",
+            "operation": "task",
+            "task_id": task["task_id"],
+            "idempotency_key": "manual-create",
+        },
+    )
+    session = created.json()
+    path = f"{base}/{session['session_id']}"
+    invalid = await plane.client.post(
+        path + "/import",
+        headers=plane.owner_auth,
+        json={
+            "expected_revision": True,
+            "idempotency_key": "invalid",
+            "result": {},
+        },
+    )
+    assert invalid.status_code == 422
+    imported = await plane.client.post(
+        path + "/import",
+        headers=plane.owner_auth,
+        json={
+            "expected_revision": session["revision"],
+            "idempotency_key": "manual-import",
+            "result": {"value": 1},
+        },
+    )
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["candidate"]["source"] == "manual_unverified"
+    assert imported.json()["candidate"]["verified"] is False
+    schema = (await plane.client.get("/api/openapi.json", headers=plane.owner_auth)).json()
+    operation = schema["paths"][base.replace(tenant, "{tenant_id}").replace(space, "{space_id}")][
+        "post"
+    ]
+    assert operation["responses"]["201"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "OperationSessionResponse"
     )
 
 

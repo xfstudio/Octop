@@ -262,6 +262,7 @@ class LongtermRepo:
                     ts,
                 ),
             )
+            self._assert_actor(conn, tenant_id, task_id, task["creator_user_id"])
             self._append(
                 conn, tenant_id, task_id, "task.created", {"plan_digest": task["plan_digest"]}
             )
@@ -369,6 +370,9 @@ class LongtermRepo:
             + task_lock,
             (tenant_id, task_id),
         ).fetchone()
+        actor = conn.execute(
+            "SELECT disabled FROM users WHERE id=?" + share_lock, (actor_user_id,)
+        ).fetchone()
         member = conn.execute(
             "SELECT role FROM bm_memberships WHERE tenant_id=? AND user_id=?" + share_lock,
             (tenant_id, actor_user_id),
@@ -376,6 +380,8 @@ class LongtermRepo:
         role = member["role"] if member else None
         if (
             task is None
+            or actor is None
+            or actor["disabled"]
             or task["creator_user_id"] != actor_user_id
             or role is None
             or (write and role == "viewer")
@@ -434,6 +440,7 @@ class LongtermRepo:
                 or member["role"] == "viewer"
             ):
                 raise RevisionConflict("execution fenced or authority revoked")
+            self._assert_actor(conn, task["tenant_id"], task["task_id"], task["creator_user_id"])
             self._append(
                 conn,
                 task["tenant_id"],

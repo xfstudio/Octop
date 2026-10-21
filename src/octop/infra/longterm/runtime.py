@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from time import perf_counter
 from typing import Any
 
 from .execution import (
@@ -30,8 +32,9 @@ EvidenceWriter = Callable[[JsonObject], Awaitable[Any]]
 
 
 class DispatchBlocked(RuntimeError):
-    def __init__(self, status: str) -> None:
+    def __init__(self, status: str, *, error_type: str | None = None) -> None:
         self.status = status
+        self.error_type = error_type
         super().__init__(status)
 
 
@@ -261,7 +264,17 @@ class LongTermRuntime:
         ):
             return self._terminal("failed", state, reason="token_budget_exhausted")
         intents: list[JsonObject] = []
+        trace: dict[str, JsonObject] = {}
         for node in batch:
+            operation = {"skill": node.get("skill", "unspecified")}
+            if node.get("skill") == "component.call":
+                operation.update(component_id=node["component_id"], operation=node["operation"])
+            trace[node["id"]] = {
+                "operation": operation,
+                "input_digest": hashlib.sha256(
+                    canonical_json(dispatch_nodes[node["id"]]["input"]).encode("utf-8")
+                ).hexdigest(),
+            }
             intent = self._event(
                 task,
                 state,
@@ -271,6 +284,7 @@ class LongTermRuntime:
                 authorized=True,
                 token_reserved=reservations[node["id"]],
                 idempotency_key=execution_key(task, plan["digest"], state["cycle"], node["id"]),
+                **trace[node["id"]],
             )
             # Persist *all* intents before concurrent execution. A sink failure dispatches nothing.
             if self.evidence_writer:
@@ -289,38 +303,51 @@ class LongTermRuntime:
                 "observation": copy.deepcopy(state.get("observation", {})),
                 "diagnosis": copy.deepcopy(state.get("diagnosis", {})),
             }
-            if self.control_checker:
-                latest = await self.control_checker(task, copy.deepcopy(state))
-                if not isinstance(latest, dict):
-                    raise DispatchBlocked("paused")
-                if latest.get("cancelled"):
-                    raise DispatchBlocked("cancelled")
-                if latest.get("paused"):
-                    raise DispatchBlocked("paused")
-                scoped_task["control"] = latest
-                if not authorized(node, scoped_task, state, now=self.clock()):
-                    raise DispatchBlocked("waiting_approval")
-            remaining = (
-                plan["timeout_seconds"]
-                - (self.clock() - parse_utc(state["started_at"])).total_seconds()
-            )
-            if remaining <= 0:
-                raise DispatchBlocked("failed")
-            async with asyncio.timeout(min(node["timeout_seconds"], remaining)):
-                node = dispatch_nodes[node["id"]]
-                if node.get("skill") == "local.echo":
-                    return {
-                        "output": copy.deepcopy(node.get("input", {})),
-                        "source": "local.echo",
-                        "usage": {"total_tokens": 0},
-                    }
-                if self.node_executor is None:
+            try:
+                if self.control_checker:
+                    latest = await self.control_checker(task, copy.deepcopy(state))
+                    if not isinstance(latest, dict):
+                        raise DispatchBlocked("paused")
+                    if latest.get("cancelled"):
+                        raise DispatchBlocked("cancelled")
+                    if latest.get("paused"):
+                        raise DispatchBlocked("paused")
+                    scoped_task["control"] = latest
+                    if not authorized(node, scoped_task, state, now=self.clock()):
+                        raise DispatchBlocked("waiting_approval")
+                remaining = (
+                    plan["timeout_seconds"]
+                    - (self.clock() - parse_utc(state["started_at"])).total_seconds()
+                )
+                if remaining <= 0:
                     raise DispatchBlocked("failed")
-                result = await self.node_executor(node, scoped_task)
-                if not isinstance(result, dict):
-                    raise TypeError("executor result must be a JSON object")
-                canonical_json(result)
-                return result
+            except DispatchBlocked:
+                raise
+            except Exception as exc:
+                raise DispatchBlocked("failed", error_type=type(exc).__name__) from exc
+            trace[node["id"]]["started_at"] = self.clock().isoformat()
+            started = perf_counter()
+            try:
+                async with asyncio.timeout(min(node["timeout_seconds"], remaining)):
+                    node = dispatch_nodes[node["id"]]
+                    if node.get("skill") == "local.echo":
+                        return {
+                            "output": copy.deepcopy(node.get("input", {})),
+                            "source": "local.echo",
+                            "usage": {"total_tokens": 0},
+                        }
+                    if self.node_executor is None:
+                        raise DispatchBlocked("failed")
+                    result = await self.node_executor(node, scoped_task)
+                    if not isinstance(result, dict):
+                        raise TypeError("executor result must be a JSON object")
+                    canonical_json(result)
+                    return result
+            finally:
+                trace[node["id"]].update(
+                    finished_at=self.clock().isoformat(),
+                    duration_ms=round((perf_counter() - started) * 1000, 3),
+                )
 
         state["inflight_writes"] = [node["id"] for node in batch if node["risk"] != "R0"]
         outcomes = await asyncio.gather(*(execute(node) for node in batch), return_exceptions=True)
@@ -332,7 +359,12 @@ class LongTermRuntime:
             if isinstance(outcome, DispatchBlocked):
                 deferred.append(outcome.status)
                 event = self._event(
-                    task, state, "action_not_dispatched", node_id=node["id"], reason=outcome.status
+                    task,
+                    state,
+                    "action_not_dispatched",
+                    node_id=node["id"],
+                    reason=outcome.status,
+                    **({"error_type": outcome.error_type} if outcome.error_type else {}),
                 )
                 if self.evidence_writer:
                     await self.evidence_writer(event)
@@ -366,7 +398,10 @@ class LongTermRuntime:
                 charge = measured
             usage["budget_consumed"] += charge
             state["node_results"][node["id"]] = value
-            state["last_action_completed_at"] = self.clock().isoformat()
+            finished_at = trace[node["id"]]["finished_at"]
+            state["last_action_completed_at"] = max(
+                finished_at, state.get("last_action_completed_at", finished_at)
+            )
             completed = self._event(
                 task,
                 state,
@@ -376,7 +411,8 @@ class LongTermRuntime:
                 token_reserved=reservations[node["id"]],
                 token_measured=measured,
                 token_charge=charge,
-                completed_at=state["last_action_completed_at"],
+                completed_at=finished_at,
+                **trace[node["id"]],
                 **value,
             )
             if self.evidence_writer:

@@ -18,9 +18,15 @@ import {
   isComponentPermissionError as isPermissionError,
 } from "./componentMetadata";
 import ComponentProjectDialog from "./ComponentProjectDialog";
+import type { OperationSessionSeed } from "./OperationSessionDialog";
 import styles from "./ComponentCenter.module.less";
 
-export type ComponentCenterTab = "workflow" | "sync" | "tasks" | "integrations";
+export type ComponentCenterTab =
+  | "workflow"
+  | "sync"
+  | "tasks"
+  | "integrations"
+  | "evaluation";
 
 export interface ComponentCenterProps {
   connected: boolean;
@@ -34,6 +40,7 @@ export interface ComponentCenterProps {
   onNavigate: (tab: ComponentCenterTab) => void;
   onOperation: (kind: TaskOperation, task: LongtermTask) => void;
   onChanged?: () => void;
+  onSession?: (seed: OperationSessionSeed) => void;
 }
 
 const OCTOP_LINKS = [
@@ -66,6 +73,7 @@ export default function ComponentCenter({
   onNavigate,
   onOperation,
   onChanged,
+  onSession,
 }: ComponentCenterProps) {
   const { t } = useTranslation();
   const scope = JSON.stringify([
@@ -387,6 +395,21 @@ export default function ComponentCenter({
               )}
               <div className={styles.actions}>
                 <Space wrap>
+                  {onSession && (
+                    <Button
+                      disabled={!scopeReady || !tenantRole || !componentEnabled}
+                      onClick={() =>
+                        onSession({
+                          component_id: id,
+                          ...(selectedTask
+                            ? { task_id: selectedTask.task_id }
+                            : {}),
+                        })
+                      }
+                    >
+                      {t("operationSessions.entry")}
+                    </Button>
+                  )}
                   {id === "octop" &&
                     OCTOP_LINKS.filter(
                       ([, href]) => connected && canAccessPath(href),
@@ -411,6 +434,11 @@ export default function ComponentCenter({
                   {id === "temporal" && (
                     <Button onClick={() => onNavigate("tasks")}>
                       {t("componentCenter.actions.temporal")}
+                    </Button>
+                  )}
+                  {id === "commerceagentbench" && (
+                    <Button onClick={() => onNavigate("evaluation")}>
+                      {t("evaluationCenter.title")}
                     </Button>
                   )}
                   {operation && (
@@ -489,6 +517,19 @@ export default function ComponentCenter({
             canManage={canManage && ["owner", "admin"].includes(tenantRole)}
             onClose={() => setProjectDialog(null)}
             onChanged={onChanged}
+            onReturnResult={
+              onSession
+                ? (result) => {
+                    setProjectDialog(null);
+                    onSession({
+                      component_id: projectDialog.id,
+                      operation: result.operation,
+                      input: {},
+                      initial_result: result.result,
+                    });
+                  }
+                : undefined
+            }
           />
         )}
     </div>

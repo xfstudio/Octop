@@ -70,6 +70,11 @@ class LongtermService:
         self.agent_registry = agent_registry
         self.components = ComponentManager(services)
         self.component_runtime = ComponentRuntimeManager(self.components)
+        from octop.infra.longterm.evaluation_center import EvaluationCenterService
+        from octop.infra.longterm.operation_sessions import OperationSessionService
+
+        self.operation_sessions = OperationSessionService(self)
+        self.evaluation_center = EvaluationCenterService(self)
         self._jobs: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._closed = False
 
@@ -96,6 +101,9 @@ class LongtermService:
     def authorize(
         self, tenant_id: str, user: User, *, write: bool = False, admin: bool = False
     ) -> str:
+        actor = self.services.user_repo.get(user.id)
+        if actor is None or actor.disabled:
+            raise OctopError(ErrorCode.FORBIDDEN, "tenant authority revoked")
         if write:
             self.components.require_enabled("octop")
         role = self.repo.role(tenant_id, user.id)
@@ -340,7 +348,10 @@ class LongtermService:
         if len(canonical(task).encode()) > 524288:
             raise _invalid("frozen_task_too_large")
         task["plan_digest"] = compile_workflow(task)["digest"]
-        return self.repo.create_task(task, key, request_digest)
+        try:
+            return self.repo.create_task(task, key, request_digest)
+        except AuthorityRevoked as exc:
+            raise self._revoked(exc) from exc
 
     def command(
         self, tenant_id: str, task_id: str, user: User, data: dict[str, Any]
@@ -443,6 +454,7 @@ class LongtermService:
     async def recover(self) -> None:
         for tenant_id, task_id in self.repo.dispatchable():
             self.schedule(tenant_id, task_id)
+        await self.evaluation_center.recover()
 
     def schedule(self, tenant_id: str, task_id: str) -> None:
         key = (tenant_id, task_id)
@@ -453,6 +465,7 @@ class LongtermService:
         )
 
     async def close(self) -> None:
+        await self.evaluation_center.close()
         self._closed = True
         jobs = list(self._jobs.values())
         for job in jobs:
@@ -500,7 +513,8 @@ class LongtermService:
         keepalive = asyncio.create_task(heartbeat())
         try:
             role = self.repo.role(tenant_id, task["creator_user_id"])
-            if role is None or role == "viewer":
+            actor = self.services.user_repo.get(task["creator_user_id"])
+            if role is None or role == "viewer" or actor is None or actor.disabled:
                 self.repo.checkpoint(
                     task,
                     owner,
@@ -550,7 +564,8 @@ class LongtermService:
             ) -> dict[str, Any]:
                 latest = self.repo.task(tenant_id, task_id)
                 role = self.repo.role(tenant_id, task["creator_user_id"])
-                if latest is None or role in {None, "viewer"}:
+                actor = self.services.user_repo.get(task["creator_user_id"])
+                if latest is None or role in {None, "viewer"} or actor is None or actor.disabled:
                     return {"paused": True}
                 return dict(latest.get("control", {}))
 

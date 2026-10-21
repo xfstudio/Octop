@@ -94,6 +94,59 @@ async def test_seven_stages_complete_offline_without_claiming_goal_success():
     assert result.result["decision"] == "stopped"
 
 
+async def test_trace_uses_actual_concurrent_completion_times_and_input_digests():
+    fast_finished = asyncio.Event()
+
+    async def executor(node, scoped):
+        if node["id"] == "slow":
+            await fast_finished.wait()
+            await asyncio.sleep(0.02)
+        else:
+            fast_finished.set()
+        return {"output": node["id"], "usage": {"total_tokens": 0}}
+
+    value = task(
+        [
+            {
+                "id": "slow",
+                "skill": "test.read",
+                "risk": "R0",
+                "input": {"prompt": "private content"},
+            },
+            {"id": "fast", "skill": "test.read", "risk": "R0", "input": {}},
+        ],
+        max_parallel=2,
+    )
+    runtime = LongTermRuntime(node_executor=executor)
+    state = await advance_to_act(runtime, value)
+    result = await runtime.advance(value, state)
+    completed = {e["node_id"]: e for e in result.events if e["kind"] == "action_completed"}
+    assert set(completed) == {"slow", "fast"}
+    assert completed["fast"]["finished_at"] < completed["slow"]["finished_at"]
+    assert completed["fast"]["duration_ms"] < completed["slow"]["duration_ms"]
+    assert result.checkpoint["last_action_completed_at"] == completed["slow"]["finished_at"]
+    for event in completed.values():
+        assert event["started_at"] <= event["finished_at"]
+        assert event["completed_at"] == event["finished_at"]
+        assert event["operation"] == {"skill": "test.read"}
+        assert len(event["input_digest"]) == 64
+        assert "private content" not in str(event)
+
+
+async def test_failed_node_trace_keeps_elapsed_time_without_exception_text():
+    async def executor(node, scoped):
+        raise ValueError("sensitive external error")
+
+    runtime = LongTermRuntime(node_executor=executor)
+    value = task([{"id": "read", "skill": "test.read", "risk": "R0"}])
+    state = await advance_to_act(runtime, value)
+    result = await runtime.advance(value, state)
+    completed = next(e for e in result.events if e["kind"] == "action_completed")
+    assert completed["error_type"] == "ValueError"
+    assert completed["duration_ms"] >= 0
+    assert "sensitive external error" not in str(completed)
+
+
 async def test_checkpoint_identity_and_plan_must_match():
     runtime, value = LongTermRuntime(), task()
     first = await runtime.advance(value)
@@ -425,3 +478,34 @@ async def test_parallel_batch_cannot_overspend_a_single_action_mandate():
     result = await runtime.advance(value, await advance_to_act(runtime, value))
     assert result.status == "waiting_approval"
     assert result.checkpoint["actions"] == 0
+
+
+async def test_control_check_failure_records_no_dispatch_or_usage():
+    calls = []
+    persisted = []
+
+    async def execute(node, scoped):
+        calls.append(node["id"])
+        return {}
+
+    async def broken_control(value, checkpoint):
+        raise RuntimeError("synthetic control-store failure")
+
+    async def record(event):
+        persisted.append(event)
+
+    value = task([{"id": "read", "risk": "R0"}])
+    runtime = LongTermRuntime(execute, control_checker=broken_control, evidence_writer=record)
+    result = await runtime.advance(value, await advance_to_act(runtime, value))
+    assert result.status == "failed"
+    assert result.result["reason"] == "dispatch_blocked"
+    assert calls == []
+    assert result.checkpoint["actions"] == 0
+    assert result.checkpoint["node_results"] == {}
+    assert result.checkpoint["token_usage"]["unknown_actions"] == 0
+    assert result.checkpoint["token_usage"]["budget_consumed"] == 0
+    blocked = persisted[-1]
+    assert blocked["kind"] == "action_not_dispatched"
+    assert blocked["error_type"] == "RuntimeError"
+    assert not any(event["kind"] == "action_completed" for event in persisted)
+    assert not {"started_at", "finished_at", "duration_ms"} & blocked.keys()

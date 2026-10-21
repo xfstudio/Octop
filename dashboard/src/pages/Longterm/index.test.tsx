@@ -15,7 +15,7 @@ const getComputedStyle = window.getComputedStyle.bind(window);
 window.getComputedStyle = (element) => getComputedStyle(element);
 
 const mocks = vi.hoisted(() => ({
-  user: null as { id: number } | null,
+  user: null as { id: number; role?: string } | null,
   translate: (key: string) => key,
   timezone: vi.fn(() => "UTC"),
 }));
@@ -37,6 +37,30 @@ vi.mock("../../layouts/PageShell", () => ({
 vi.mock("../../utils/antdMessage", () => ({
   message: { success: vi.fn(), error: vi.fn() },
 }));
+vi.mock("./OperationSessionDialog", () => ({
+  default: () => (
+    <div role="dialog">
+      <a href="http://127.0.0.1:3000">private-component-console</a>
+    </div>
+  ),
+}));
+vi.mock("./EvaluationCenter", async () => {
+  const { useState } = await import("react");
+  return {
+    default: function EvaluationScopeProbe({ role }: { role?: string }) {
+      const [hasResult, setHasResult] = useState(false);
+      return (
+        <div>
+          <span data-testid="evaluation-role">{role}</span>
+          <button onClick={() => setHasResult(true)}>
+            inspect-private-evaluation
+          </button>
+          {hasResult && <span>private-evaluation-result</span>}
+        </div>
+      );
+    },
+  };
+});
 vi.mock("../../api/modules/longterm", () => ({
   longtermApi: {
     tenants: vi.fn(),
@@ -250,6 +274,76 @@ describe("offline workbench and revision-safe sync", () => {
       plan_digest: "a".repeat(64),
       node_id: "write-report",
     });
+  });
+
+  it("clears private sessions and evaluation results on permission changes while preserving sessions after ordinary refreshes", async () => {
+    mocks.user = { id: 1, role: "admin" };
+    const user = userEvent.setup();
+    const page = () => (
+      <MemoryRouter>
+        <LongtermPage standalone />
+      </MemoryRouter>
+    );
+    const rendered = render(page());
+    await user.click(screen.getByRole("tab", { name: "longterm.syncTab" }));
+    await user.click(
+      screen.getByRole("combobox", { name: "longterm.selectTenant" }),
+    );
+    await user.click(await screen.findByText("Team (owner)"));
+    await user.click(
+      screen.getByRole("combobox", { name: "longterm.selectSpace" }),
+    );
+    await user.click(await screen.findByText("Research"));
+    await user.click(
+      screen.getByRole("tab", { name: "evaluationCenter.title" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "inspect-private-evaluation" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "operationSessions.recent" }),
+    );
+    expect(
+      screen.getByRole("link", { name: "private-component-console" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("private-evaluation-result")).toBeInTheDocument();
+
+    mocks.user = { id: 1, role: "user" };
+    rendered.rerender(page());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText("private-evaluation-result"),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "inspect-private-evaluation" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "operationSessions.recent" }),
+    );
+
+    const refreshCalls = vi.mocked(longtermApi.tenants).mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "longterm.refresh" }));
+    await waitFor(() =>
+      expect(longtermApi.tenants).toHaveBeenCalledTimes(refreshCalls + 1),
+    );
+    expect(
+      screen.getByRole("link", { name: "private-component-console" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("private-evaluation-result")).toBeInTheDocument();
+
+    vi.mocked(longtermApi.tenants).mockResolvedValue({
+      tenants: [{ tenant_id: "t1", name: "Team", role: "viewer", revision: 2 }],
+    });
+    await user.click(screen.getByRole("button", { name: "longterm.refresh" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("evaluation-role")).toHaveTextContent("viewer"),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("private-evaluation-result"),
+    ).not.toBeInTheDocument();
   });
 
   it("previews a real Canvas export offline and applies it only after confirmation", async () => {

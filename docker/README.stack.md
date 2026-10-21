@@ -78,6 +78,8 @@ docker compose restart octop worker
 
 主项目内的组件操作节点、跨节点输入引用及审批方式见 [组件工作流](../docs/component-workflows.md)。这些节点使用同一租户控制面，支持本机及 Temporal 运行，不需要从浏览器直接请求组件私有接口。
 
+工作台还提供七组件操作会话和评测中心：控制台操作后返回读取结果，确认保存再回填草稿；评测为每例每次重复派生独立任务，使用同一主项目及 worker。使用方法与 CommerceAgentBench 来源区分见 [评测说明](../docs/evaluation-system.md)。无需第二个 Compose 文件或额外评测协调服务。
+
 在仓库根目录运行同一个 Compose 文件的 watch 模式：
 
 ```sh

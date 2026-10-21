@@ -10,7 +10,7 @@ import pytest
 from octop.config import OctopConfig
 from octop.infra.db.migrate import run_migrations
 from octop.infra.db.pool import SqlitePool
-from octop.infra.db.repos.longterm import LongtermRepo, RevisionConflict
+from octop.infra.db.repos.longterm import AuthorityRevoked, LongtermRepo, RevisionConflict, digest
 from octop.infra.db.services import build_shared_services
 from octop.infra.errors import OctopError
 from octop.infra.longterm.service import LongtermService
@@ -408,3 +408,30 @@ def test_two_database_connections_have_one_config_winner(platform, tmp_path):
             )
     finally:
         other_pool.close()
+
+
+async def test_disabled_creator_pauses_background_task_before_next_dispatch(platform, monkeypatch):
+    svc, user, _, tenant, space = platform
+    monkeypatch.setattr(svc, "schedule", lambda *args: None)
+    task = svc.create_task(tenant, user, task_body(space))
+    svc.command(tenant, task["task_id"], user, {"command": "start", "expected_revision": 1})
+    svc.services.user_repo.set_disabled(user.id, True)
+    assert await svc.step(tenant, task["task_id"]) == "paused"
+    row = svc.repo.task(tenant, task["task_id"])
+    assert row["status"] == "paused"
+    assert row["checkpoint"] == {}
+    with pytest.raises(OctopError) as error:
+        svc.authorize(tenant, user, write=True)
+    assert error.value.status == 403
+
+
+def test_disabled_creator_cannot_admit_or_authorize_native_evaluation_task(platform):
+    svc, user, _, tenant, space = platform
+    original = svc.create_task(tenant, user, task_body(space))
+    document = {**original, "task_id": "disabled-eval-admission"}
+    svc.services.user_repo.set_disabled(user.id, True)
+    with pytest.raises(AuthorityRevoked):
+        svc.repo.create_task(document, "disabled-eval", digest(document))
+    assert svc.repo.task(tenant, document["task_id"]) is None
+    with pytest.raises(AuthorityRevoked):
+        svc.repo.assert_authority(tenant, original["task_id"], user.id)

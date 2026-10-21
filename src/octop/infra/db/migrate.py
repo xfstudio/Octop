@@ -2103,6 +2103,7 @@ def run_migrations(db: DatabasePool) -> None:
         )
     ):
         _, longterm_path = longterm_migrations[0]
+        watermark = max(_current_version(db), 22)
         longterm_sql = longterm_path.read_text(encoding="utf-8")
         if db.dialect == "postgresql":
             with db.connect() as conn, conn.transaction():
@@ -2110,6 +2111,8 @@ def run_migrations(db: DatabasePool) -> None:
         else:
             with db.connect() as conn:
                 conn.executescript(longterm_sql)
+        with db.connect() as conn:
+            conn.execute("UPDATE _schema_version SET version = ?", (watermark,))
     _reconcile_pre_squash_schema_version(db)
     _ensure_knowledge_bases_schema(db)
     _ensure_skill_packages_schema(db)

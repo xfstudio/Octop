@@ -71,6 +71,7 @@ export interface ComponentOperationsProps {
   onCancel: () => void;
   onSuccess: (result: unknown) => void;
   onManageComponent?: (componentId: string) => void;
+  onReturnResult?: (result: unknown, input?: Record<string, unknown>) => void;
 }
 
 /** A task switch unmounts the previous request scope, including its form and result. */
@@ -92,6 +93,7 @@ function OperationDialog({
   onCancel,
   onSuccess,
   onManageComponent,
+  onReturnResult,
 }: ComponentOperationsProps) {
   const { t } = useTranslation();
   const tr = (key: string) => t(`componentOperations.${key}`);
@@ -603,7 +605,38 @@ function OperationDialog({
             </Button>
           </Space>
         </Form>
-        {result !== null && <OperationResult kind={kind} value={result} />}
+        {result !== null && (
+          <>
+            <OperationResult kind={kind} value={result} />
+            {onReturnResult && asRecord(result).status !== "blocked" && (
+              <Button
+                onClick={() =>
+                  onReturnResult(
+                    asRecord(result).record ?? result,
+                    kind === "evaluate"
+                      ? {
+                          run_dir: form.getFieldValue("run_dir"),
+                          ...(form.getFieldValue("benchmark_task_id")
+                            ? {
+                                expected_task_id:
+                                  form.getFieldValue("benchmark_task_id"),
+                              }
+                            : {}),
+                        }
+                      : kind === "memory"
+                      ? {
+                          query: form.getFieldValue("query") || task.goal,
+                          max_tokens: form.getFieldValue("max_tokens") ?? 2048,
+                        }
+                      : {},
+                  )
+                }
+              >
+                {t("operationSessions.saveResult")}
+              </Button>
+            )}
+          </>
+        )}
         {(kind === "evaluate" || kind === "evolution") && (
           <ComponentArtifacts
             task={currentTask}

@@ -47,6 +47,7 @@ export default function ComponentProjectDialog({
   canManage,
   onClose,
   onChanged,
+  onReturnResult,
 }: {
   componentId: ProjectComponentId;
   tenantId: string;
@@ -54,6 +55,7 @@ export default function ComponentProjectDialog({
   canManage: boolean;
   onClose: () => void;
   onChanged?: () => void;
+  onReturnResult?: (result: ComponentProjectRead) => void;
 }) {
   const { t } = useTranslation();
   const [project, setProject] = useState<ComponentProjectBinding | null>(null);
@@ -284,6 +286,11 @@ export default function ComponentProjectDialog({
               <pre className={styles.result}>
                 {JSON.stringify(result.result, null, 2)}
               </pre>
+              {onReturnResult && (
+                <Button onClick={() => onReturnResult(result)}>
+                  {t("operationSessions.saveResult")}
+                </Button>
+              )}
             </div>
           )}
         </Form>

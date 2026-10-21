@@ -33,6 +33,13 @@ import { Link, useSearchParams } from "react-router-dom";
 import { canAccessPath } from "../../utils/permissions";
 import ComponentCenter from "./ComponentCenter";
 import ComponentOperations, { ComponentArtifacts } from "./ComponentOperations";
+import OperationSessionDialog, {
+  type OperationSessionSeed,
+} from "./OperationSessionDialog";
+import EvaluationCenter from "./EvaluationCenter";
+import { applySessionToDraft, SessionResultError } from "./sessionResults";
+import { asRecord } from "./componentOperationsHelpers";
+import type { ManagedComponentId } from "../../api/modules/componentManagement";
 import PageShell from "../../layouts/PageShell";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useServerTimezone } from "../../hooks/useServerTimezone";
@@ -120,15 +127,19 @@ export default function LongtermPage({
   const user = useCurrentUser();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSection = searchParams.get("section");
-  const activeSection = ["workflow", "sync", "tasks", "integrations"].includes(
-    requestedSection ?? "",
-  )
+  const activeSection = [
+    "workflow",
+    "sync",
+    "tasks",
+    "integrations",
+    "evaluation",
+  ].includes(requestedSection ?? "")
     ? requestedSection!
     : standalone
     ? "workflow"
     : "integrations";
   const navigateSection = (
-    section: "workflow" | "sync" | "tasks" | "integrations",
+    section: "workflow" | "sync" | "tasks" | "integrations" | "evaluation",
   ) => {
     setSearchParams((previous) => {
       const next = new URLSearchParams(previous);
@@ -202,6 +213,8 @@ export default function LongtermPage({
     task: LongtermTask;
     kind: TaskOperation;
   } | null>(null);
+  const [operationSession, setOperationSession] =
+    useState<OperationSessionSeed | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const importRef = useRef<HTMLInputElement>(null);
   const beatdesignFileRef = useRef<HTMLInputElement>(null);
@@ -214,6 +227,15 @@ export default function LongtermPage({
   const config = workspace.config;
   const connected = !!user && online && isVisible;
   const targetReady = connected && !!tenantId && !!spaceId;
+  const currentTenantRole = tenants.find(
+    (tenant) => tenant.tenant_id === tenantId,
+  )?.role;
+  const permissionScope = JSON.stringify([
+    user?.id,
+    user?.role,
+    currentTenantRole,
+  ]);
+  const sessionPermissionScope = useRef(permissionScope);
   const boundRevision =
     workspace.sync?.tenant_id === tenantId &&
     workspace.sync?.space_id === spaceId
@@ -222,7 +244,14 @@ export default function LongtermPage({
 
   useEffect(() => {
     setOperation(null);
+    setOperationSession(null);
   }, [tenantId, spaceId]);
+
+  useEffect(() => {
+    // A session opened in the current scope must survive ordinary data refreshes.
+    if (sessionPermissionScope.current !== permissionScope)
+      setOperationSession(null);
+  }, [permissionScope]);
 
   useEffect(() => {
     if (storageBlocked) return;
@@ -743,6 +772,38 @@ export default function LongtermPage({
     setOperation({ task, kind });
   }
 
+  function openSession(seed: OperationSessionSeed) {
+    if (!targetReady) {
+      message.error(t("longterm.selectTargetFirst"));
+      return;
+    }
+    sessionPermissionScope.current = permissionScope;
+    setOperationSession(seed);
+  }
+
+  function returnSessionInput(
+    input: Record<string, unknown>,
+    targetId?: string,
+  ) {
+    if (storageBlocked || storageError) {
+      message.error(t("longterm.storageWriteError"));
+      return false;
+    }
+    try {
+      const nodes = applySessionToDraft(config.workflow.nodes, input, targetId);
+      updateConfig({ workflow: { ...config.workflow, nodes } });
+      message.success(t("operationSessions.applied"));
+      return true;
+    } catch (cause) {
+      message.error(
+        cause instanceof SessionResultError
+          ? t(`operationSessions.errors.${cause.key}`)
+          : t("operationSessions.failed"),
+      );
+      return false;
+    }
+  }
+
   async function openMembers() {
     const tenant = tenantId;
     await run(async () => {
@@ -1065,6 +1126,29 @@ export default function LongtermPage({
                           >
                             {t("longterm.edit")}
                           </Button>
+                          {node.skill === "component.call" && (
+                            <Button
+                              type="link"
+                              size="small"
+                              disabled={!targetReady}
+                              onClick={() =>
+                                openSession({
+                                  component_id:
+                                    node.component_id as ManagedComponentId,
+                                  operation:
+                                    node.component_id === "semantica"
+                                      ? "receipt"
+                                      : node.operation,
+                                  input:
+                                    node.component_id === "semantica"
+                                      ? {}
+                                      : node.input,
+                                })
+                              }
+                            >
+                              {t("operationSessions.entry")}
+                            </Button>
+                          )}
                           <Popconfirm
                             title={t("longterm.deleteNodeConfirm")}
                             onConfirm={() =>
@@ -1327,6 +1411,33 @@ export default function LongtermPage({
             ),
           },
           {
+            key: "evaluation",
+            label: t("evaluationCenter.title"),
+            children: (
+              <EvaluationCenter
+                key={`${permissionScope}:${tenantId}:${spaceId}`}
+                tenantId={tenantId}
+                spaceId={spaceId}
+                role={currentTenantRole}
+                connected={connected && activeSection === "evaluation"}
+                tasks={tasks}
+                onOpenTask={(taskId) => {
+                  const scope = { tenantId, spaceId };
+                  void run(async () => {
+                    const task = await longtermApi.task(scope.tenantId, taskId);
+                    if (
+                      scopeRef.current.tenantId === scope.tenantId &&
+                      scopeRef.current.spaceId === scope.spaceId &&
+                      task.space_id === scope.spaceId
+                    )
+                      setDetail(task);
+                  });
+                }}
+                onSession={openSession}
+              />
+            ),
+          },
+          {
             key: "integrations",
             label: t("longterm.integrationsTab"),
             children: (
@@ -1343,6 +1454,7 @@ export default function LongtermPage({
                 canAccessPath={(path) => canAccessPath(user, path)}
                 onNavigate={navigateSection}
                 onOperation={(kind, task) => openOperation(task, kind)}
+                onSession={openSession}
                 onChanged={() => setRefreshKey((value) => value + 1)}
               />
             ),
@@ -1354,6 +1466,12 @@ export default function LongtermPage({
 
   const headerActions = (
     <Space wrap>
+      <Button
+        disabled={!targetReady}
+        onClick={() => openSession({ component_id: "octop" })}
+      >
+        {t("operationSessions.recent")}
+      </Button>
       {standalone ? (
         <Link to="/longterm">{t("longterm.serverConsole")}</Link>
       ) : (
@@ -1734,6 +1852,18 @@ export default function LongtermPage({
             />
             {taskActions(detail)}
             <Space wrap>
+              <Button
+                disabled={!targetReady}
+                onClick={() =>
+                  openSession({
+                    component_id: "octop",
+                    operation: "task",
+                    task_id: detail.task_id,
+                  })
+                }
+              >
+                {t("operationSessions.entry")}
+              </Button>
               {(["memory", "evaluate", "evolution", "provenance"] as const).map(
                 (kind) => (
                   <Button
@@ -1755,6 +1885,99 @@ export default function LongtermPage({
             )}
             <Tabs
               items={[
+                {
+                  key: "nodeResults",
+                  label: t("operationSessions.nodeResults"),
+                  children: (
+                    <Table
+                      rowKey="id"
+                      size="small"
+                      pagination={false}
+                      dataSource={detail.workflow.nodes}
+                      columns={[
+                        { title: t("longterm.nodeId"), dataIndex: "id" },
+                        { title: t("longterm.skill"), dataIndex: "skill" },
+                        {
+                          title: t("longterm.status"),
+                          render: (_, node) =>
+                            String(
+                              asRecord(
+                                asRecord(detail.checkpoint?.node_results)[
+                                  node.id
+                                ],
+                              ).status ?? "—",
+                            ),
+                        },
+                        {
+                          title: t("longterm.actions"),
+                          render: (_, node) => (
+                            <Space wrap>
+                              <Button
+                                size="small"
+                                disabled={!targetReady}
+                                onClick={() =>
+                                  openSession({
+                                    component_id:
+                                      node.skill === "component.call"
+                                        ? (node.component_id as ManagedComponentId)
+                                        : "octop",
+                                    operation:
+                                      node.skill === "component.call"
+                                        ? node.component_id === "semantica"
+                                          ? "receipt"
+                                          : node.operation
+                                        : "task",
+                                    input:
+                                      node.skill === "component.call" &&
+                                      node.component_id !== "semantica"
+                                        ? node.input
+                                        : {},
+                                    task_id: detail.task_id,
+                                    node_id: node.id,
+                                  })
+                                }
+                              >
+                                {t("operationSessions.entry")}
+                              </Button>
+                              <Button
+                                size="small"
+                                disabled={
+                                  !targetReady ||
+                                  asRecord(
+                                    asRecord(detail.checkpoint?.node_results)[
+                                      node.id
+                                    ],
+                                  ).status !== "succeeded"
+                                }
+                                onClick={() =>
+                                  openSession({
+                                    component_id: "octop",
+                                    operation: "node_result",
+                                    task_id: detail.task_id,
+                                    node_id: node.id,
+                                  })
+                                }
+                              >
+                                {t("operationSessions.returnNodeResult")}
+                              </Button>
+                            </Space>
+                          ),
+                        },
+                      ]}
+                      expandable={{
+                        expandedRowRender: (node) => (
+                          <pre className={styles.json}>
+                            {json(
+                              asRecord(detail.checkpoint?.node_results)[
+                                node.id
+                              ] ?? null,
+                            )}
+                          </pre>
+                        ),
+                      }}
+                    />
+                  ),
+                },
                 {
                   key: "evidence",
                   label: t("longterm.evidence"),
@@ -2038,11 +2261,50 @@ export default function LongtermPage({
             )}
             onCancel={() => setOperation(null)}
             onSuccess={() => setRefreshKey((value) => value + 1)}
+            onReturnResult={(result, input) => {
+              const componentId = (
+                {
+                  memory: "hindsight",
+                  evaluate: "commerceagentbench",
+                  evolution: "rna",
+                  provenance: "semantica",
+                } as const
+              )[operation.kind];
+              const seed: OperationSessionSeed = {
+                component_id: componentId,
+                task_id: operation.task.task_id,
+                initial_result: result,
+                ...(input
+                  ? { input }
+                  : componentId === "hindsight"
+                  ? { input: { query: operation.task.goal, max_tokens: 2048 } }
+                  : {}),
+              };
+              setOperation(null);
+              openSession(seed);
+            }}
             onManageComponent={() => {
               setOperation(null);
               setDetail(null);
               navigateSection("integrations");
             }}
+          />
+        )}
+      {operationSession &&
+        targetReady &&
+        sessionPermissionScope.current === permissionScope && (
+          <OperationSessionDialog
+            key={`${permissionScope}:${tenantId}:${spaceId}:${
+              workspace.id
+            }:${json(operationSession)}`}
+            tenantId={tenantId}
+            spaceId={spaceId}
+            seed={operationSession}
+            tasks={tasks}
+            draftNodes={config.workflow.nodes}
+            connected={connected && isVisible}
+            onClose={() => setOperationSession(null)}
+            onApply={returnSessionInput}
           />
         )}
     </>

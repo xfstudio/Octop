@@ -1,0 +1,30 @@
+-- Private, durable component readback sessions and idempotent commands.
+CREATE TABLE IF NOT EXISTS bm_operation_sessions (
+    session_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    space_id TEXT NOT NULL,
+    owner_user_id INTEGER NOT NULL REFERENCES users(id),
+    task_id TEXT,
+    status TEXT NOT NULL CHECK (status IN ('created','ready','committed','cancelled')),
+    revision INTEGER NOT NULL DEFAULT 1,
+    document_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (tenant_id, space_id, owner_user_id, session_id),
+    FOREIGN KEY (tenant_id, space_id) REFERENCES bm_spaces(tenant_id, space_id),
+    FOREIGN KEY (tenant_id, task_id) REFERENCES bm_tasks(tenant_id, task_id)
+);
+CREATE INDEX IF NOT EXISTS idx_bm_operation_sessions_owner ON bm_operation_sessions(tenant_id,space_id,owner_user_id,created_at);
+CREATE TABLE IF NOT EXISTS bm_operation_commands (
+    tenant_id TEXT NOT NULL,
+    space_id TEXT NOT NULL,
+    owner_user_id INTEGER NOT NULL,
+    session_id TEXT NOT NULL,
+    command_key TEXT NOT NULL,
+    request_digest TEXT NOT NULL,
+    response_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (tenant_id, space_id, owner_user_id, command_key),
+    FOREIGN KEY (tenant_id,space_id,owner_user_id,session_id) REFERENCES bm_operation_sessions(tenant_id,space_id,owner_user_id,session_id)
+);
+UPDATE _schema_version SET version = 23;
